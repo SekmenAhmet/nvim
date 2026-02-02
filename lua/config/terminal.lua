@@ -55,10 +55,11 @@ function M.toggle()
 
   -- Keymaps for the terminal buffer
   local opts = { buffer = terminal_buf, silent = true }
-  vim.keymap.set("t", "<Esc>", [[<C-\\><C-n>]], opts)
-  vim.keymap.set("t", "<C-t>", M.toggle, opts) -- Allow closing with same key in terminal mode
+  vim.keymap.set("t", "<Esc>", [[<C-\\><C-n>]], opts) -- Exit insert mode
+  vim.keymap.set("t", "<C-t>", M.toggle, opts) 
   vim.keymap.set("n", "<C-t>", M.toggle, opts)
   vim.keymap.set("n", "q", M.toggle, opts)
+  vim.keymap.set("n", "<Esc>", M.toggle, opts) -- Allow closing with Esc in Normal mode
 end
 
 -- Global Keymaps

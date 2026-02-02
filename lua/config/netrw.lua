@@ -37,13 +37,13 @@ local function draw()
   M.items = {}
   
   -- Header
-  table.insert(lines, "   " .. vim.fn.fnamemodify(M.root, ":~"))
+  table.insert(lines, "  " .. vim.fn.fnamemodify(M.root, ":~"))
   table.insert(M.items, { path = M.root, type = "directory" })
 
   local function traverse(path, depth)
     local entries = get_items(path)
     for _, item in ipairs(entries) do
-      local prefix = "   " .. string.rep("  ", depth)
+      local prefix = "  " .. string.rep("  ", depth)
       local icon = (item.type == "directory") and "> " or "  "
       
       -- Open/Close indicators
@@ -80,6 +80,8 @@ local function toggle()
   if M.win and vim.api.nvim_win_is_valid(M.win) then
     vim.api.nvim_win_close(M.win, true)
     M.win = nil
+    -- Force redraw of tabline so it detects sidebar is gone
+    vim.cmd("redrawtabline")
     return
   end
   
@@ -95,7 +97,11 @@ local function toggle()
   M.win = vim.api.nvim_get_current_win()
   vim.api.nvim_win_set_buf(M.win, M.buf)
   
-  vim.api.nvim_win_set_width(M.win, 30)
+  local width = 30
+  vim.api.nvim_win_set_width(M.win, width)
+  -- Force redraw of tabline to detect new sidebar
+  vim.cmd("redrawtabline")
+  
   vim.api.nvim_win_set_option(M.win, "number", false)
   vim.api.nvim_win_set_option(M.win, "relativenumber", false)
   vim.api.nvim_win_set_option(M.win, "cursorline", true)
@@ -121,7 +127,34 @@ local function toggle()
       end
       draw()
     else
+      -- 1. Try to go to the previous window
       vim.cmd("wincmd p")
+      local target_win = vim.api.nvim_get_current_win()
+      local cfg = vim.api.nvim_win_get_config(target_win)
+      
+      -- Check if the target is valid (not the tree itself, not floating)
+      if target_win == M.win or cfg.relative ~= "" then
+        -- If previous window wasn't suitable, search for *any* normal window
+        target_win = nil
+        for _, w in ipairs(vim.api.nvim_list_wins()) do
+          if w ~= M.win then
+            local c = vim.api.nvim_win_get_config(w)
+            if c.relative == "" then
+              target_win = w
+              break
+            end
+          end
+        end
+        
+        if target_win then
+          vim.api.nvim_set_current_win(target_win)
+        else
+          -- No suitable window found, create a split
+          vim.cmd("vsplit")
+          vim.cmd("wincmd l") 
+        end
+      end
+
       vim.cmd("edit " .. vim.fn.fnameescape(item.path))
     end
   end)

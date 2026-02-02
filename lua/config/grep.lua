@@ -7,7 +7,7 @@ local M = {}
 local function create_window()
   local width = math.floor(vim.o.columns * 0.8)
   local height = math.floor(vim.o.lines * 0.8)
-  local row = math.floor((vim.o.lines - height) / 2)
+  local row = math.floor(vim.o.lines * 0.1) -- Position higher
   local col = math.floor((vim.o.columns - width) / 2)
 
   local buf = vim.api.nvim_create_buf(false, true)
@@ -43,11 +43,13 @@ function M.open()
   local grep_results = {}
 
   -- Détecter l'outil disponible
-  local cmd_base = "grep -rnH --exclude-dir=.git --exclude=*.md --exclude=*.json --exclude=*.lock --exclude=*.log" 
+  local cmd_base = nil
   if vim.fn.executable("rg") == 1 then
     cmd_base = "rg --vimgrep --no-heading -g '!*.md' -g '!*.json' -g '!*.lock' -g '!*.log'"
   elseif vim.fn.executable("git") == 1 then
     cmd_base = "git grep -n -- ':(exclude)*.md' ':(exclude)*.json' ':(exclude)*.lock' ':(exclude)*.log'"
+  elseif vim.fn.executable("grep") == 1 then
+    cmd_base = "grep -rnH --exclude-dir=.git --exclude=*.md --exclude=*.json --exclude=*.lock --exclude=*.log" 
   end
 
   -- Highlight syntaxique
@@ -77,7 +79,9 @@ function M.open()
     -- Reset des résultats
     grep_results = {}
 
-    if query == "" then
+    if not cmd_base then
+       table.insert(display_lines, padding .. "Error: No grep tool found (install ripgrep or git)")
+    elseif query == "" then
       table.insert(display_lines, padding .. "-- Type to search --")
     else
       if #output_lines == 0 then
@@ -116,6 +120,11 @@ function M.open()
     timer:start(300, 0, vim.schedule_wrap(function()
       if not vim.api.nvim_buf_is_valid(buf) then return end
       
+      if not cmd_base then
+        update_view(query, {})
+        return
+      end
+
       if query == "" then
         update_view("", {})
         return
@@ -125,8 +134,20 @@ function M.open()
       local safe_query = query:gsub('"', '\\"')
       
       -- Exécuter la commande (limité à 200 résultats pour la perf)
-      local cmd = cmd_base .. ' "' .. safe_query .. '" . | head -n 200'
+      -- On utilise shell pipe head si dispo, sinon on coupe en Lua
+      local cmd = cmd_base .. ' "' .. safe_query .. '" .'
+      if vim.fn.executable("head") == 1 then
+         cmd = cmd .. " | head -n 200"
+      end
+
       local output = vim.fn.systemlist(cmd)
+      
+      -- Fallback limit if head not available
+      if #output > 200 then
+         local limited = {}
+         for i=1, 200 do limited[i] = output[i] end
+         output = limited
+      end
       
       update_view(query, output)
     end))

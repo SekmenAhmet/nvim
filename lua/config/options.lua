@@ -1,6 +1,14 @@
 -- Options générales
 vim.g.mapleader = " "
 
+-- Detect OS and set Shell
+if vim.loop.os_uname().sysname == "Windows_NT" then
+  vim.opt.shell = "powershell"
+else
+  -- Linux/Mac
+  vim.opt.shell = "fish"
+end
+
 vim.opt.number = true
 vim.opt.relativenumber = true
 vim.opt.tabstop = 2
@@ -21,4 +29,5 @@ vim.opt.signcolumn = "yes"
 vim.opt.completeopt = "menu,menuone,noinsert,noselect"
 vim.opt.undofile = true
 vim.opt.list = true
-vim.opt.listchars = { trail = "·", nbsp = "␣", tab = "  " }
+-- Ensure no dots for leading spaces ("lead" defaults to Space if not set, but let's be explicit)
+vim.opt.listchars = { trail = "·", nbsp = "␣", tab = "  ", lead = " " }
