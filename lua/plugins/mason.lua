@@ -20,13 +20,6 @@ return {
     config = function()
       local lsp_config = require("config.lsp")
       require("mason-lspconfig").setup({
-        ensure_installed = {
-          "clangd",
-          "pyright",
-          "rust_analyzer",
-          "gopls",
-        },
-        automatic_installation = true,
         handlers = {
           -- Explicitly disable asm_lsp
           ["asm_lsp"] = function() end,
