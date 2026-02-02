@@ -1,8 +1,6 @@
 -- Native UI Overrides (Floating Input/Select)
 local M = {}
 
-local colors = require("config.colors")
-
 -- Helper to create a floating window centered
 local function create_win(width, height, title)
   local cols = vim.o.columns
@@ -68,6 +66,54 @@ function M.select(items, opts, on_choice)
   vim.keymap.set("n", "q", close, { buffer = buf, silent = true })
   
   -- Auto-select first item if needed, but usually just wait
+end
+
+-- Open a file in a "normal" window (not sidebar, not floating)
+function M.open_in_normal_win(file, lnum)
+  -- If we are in a floating window, close it first or switch to source
+  -- But usually this is called after closing the float.
+  
+  local function is_sidebar(win)
+    local b = vim.api.nvim_win_get_buf(win)
+    local ft = vim.bo[b].filetype
+    local bt = vim.bo[b].buftype
+    return ft == "netrw" or ft == "NvimTree" or ft == "oil" or bt == "nofile"
+  end
+
+  local curr_win = vim.api.nvim_get_current_win()
+  local cfg = vim.api.nvim_win_get_config(curr_win)
+
+  if is_sidebar(curr_win) or cfg.relative ~= "" then
+    -- Try previous window
+    vim.cmd("wincmd p")
+    curr_win = vim.api.nvim_get_current_win()
+    cfg = vim.api.nvim_win_get_config(curr_win)
+
+    if is_sidebar(curr_win) or cfg.relative ~= "" then
+      -- Find ANY normal window
+      local found = false
+      for _, w in ipairs(vim.api.nvim_list_wins()) do
+        if not is_sidebar(w) and vim.api.nvim_win_get_config(w).relative == "" then
+          vim.api.nvim_set_current_win(w)
+          found = true
+          break
+        end
+      end
+
+      if not found then
+        -- If no normal window, create a split from the sidebar
+        vim.cmd("vsplit")
+        -- Move to the new window (usually right)
+        vim.cmd("wincmd l")
+      end
+    end
+  end
+
+  vim.cmd("edit " .. vim.fn.fnameescape(file))
+  if lnum then
+    vim.api.nvim_win_set_cursor(0, { tonumber(lnum), 0 })
+    vim.cmd("normal! zz")
+  end
 end
 
 -- Override vim.ui.input (Used by Rename, etc.)

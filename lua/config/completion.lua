@@ -13,9 +13,7 @@ vim.api.nvim_set_hl(0, "CmpItemAbbrMatch", { fg = "#569cd6", bold = true })
 vim.api.nvim_set_hl(0, "CmpItemKind", { fg = "#4ec9b0" })
 vim.api.nvim_set_hl(0, "CmpItemMenu", { fg = "#6a9955", italic = true })
 
-local Mappings = {}
-
-function Mappings.setup()
+local function setup_mappings()
   local function map(mode, lhs, rhs, opts)
     opts = opts or {}
     vim.keymap.set(mode, lhs, rhs, opts)
@@ -53,7 +51,7 @@ function Mappings.setup()
   end, { expr = true, desc = "Previous completion or shift-tab" })
 end
 
-Mappings.setup()
+setup_mappings()
 
 vim.api.nvim_create_autocmd("LspAttach", {
   callback = function(event)

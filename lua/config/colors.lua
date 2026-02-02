@@ -14,9 +14,7 @@ local M = {
 
   -- UI Base
   bg_light = "#24283b",
-  bg_sidebar = "#16161e",
   gray_dark = "#444b6a",
-  gray_light = "#787c99",
 }
 
 return M

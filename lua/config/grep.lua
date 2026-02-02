@@ -69,6 +69,7 @@ function M.open()
 
   -- Fonction d'affichage
   local function update_view(query, output_lines)
+    if not vim.api.nvim_win_is_valid(win) then return end
     local display_lines = {}
     
     -- Ligne 1 : Input
@@ -200,11 +201,7 @@ function M.open()
 
     if result then
       vim.api.nvim_win_close(win, true)
-      vim.cmd("e " .. result.filename)
-      -- Aller à la ligne
-      vim.api.nvim_win_set_cursor(0, { tonumber(result.lnum), 0 })
-      -- Centrer
-      vim.cmd("normal! zz")
+      require("config.ui").open_in_normal_win(result.filename, result.lnum)
     end
   end
 

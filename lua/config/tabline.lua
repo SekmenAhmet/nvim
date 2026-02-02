@@ -28,6 +28,22 @@ function M.render()
   local current_buf = vim.api.nvim_get_current_buf()
   local buffers = vim.api.nvim_list_bufs()
 
+  -- Check for single empty buffer to hide tabline
+  local listed_count = 0
+  local single_buf = nil
+  for _, buf in ipairs(buffers) do
+    if vim.bo[buf].buflisted then
+      listed_count = listed_count + 1
+      single_buf = buf
+    end
+  end
+  if listed_count == 1 and single_buf then
+    local name = vim.api.nvim_buf_get_name(single_buf)
+    if name == "" and not vim.bo[single_buf].modified then
+      return ""
+    end
+  end
+
   -- Fond de remplissage au début
   line = line .. "%#TabLineFill#"
 
@@ -44,7 +60,7 @@ function M.render()
       
       -- Nettoyage du nom
       if name == "" then
-        name = "[No Name]"
+        name = "Untitled"
       else
         name = vim.fn.fnamemodify(name, ":t")
       end

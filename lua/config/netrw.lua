@@ -127,35 +127,7 @@ local function toggle()
       end
       draw()
     else
-      -- 1. Try to go to the previous window
-      vim.cmd("wincmd p")
-      local target_win = vim.api.nvim_get_current_win()
-      local cfg = vim.api.nvim_win_get_config(target_win)
-      
-      -- Check if the target is valid (not the tree itself, not floating)
-      if target_win == M.win or cfg.relative ~= "" then
-        -- If previous window wasn't suitable, search for *any* normal window
-        target_win = nil
-        for _, w in ipairs(vim.api.nvim_list_wins()) do
-          if w ~= M.win then
-            local c = vim.api.nvim_win_get_config(w)
-            if c.relative == "" then
-              target_win = w
-              break
-            end
-          end
-        end
-        
-        if target_win then
-          vim.api.nvim_set_current_win(target_win)
-        else
-          -- No suitable window found, create a split
-          vim.cmd("vsplit")
-          vim.cmd("wincmd l") 
-        end
-      end
-
-      vim.cmd("edit " .. vim.fn.fnameescape(item.path))
+      require("config.ui").open_in_normal_win(item.path)
     end
   end)
   
