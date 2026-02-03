@@ -6,9 +6,9 @@ local uv = vim.loop
 
 -- Configuration
 local CONFIG = {
-  width_pct = 0.9,
+  width_pct = 0.8,
   height_pct = 0.8,
-  preview_width_pct = 0.5,
+  preview_width_pct = 0.6,
   batch_size = 200, 
 }
 
@@ -90,7 +90,7 @@ local function update_preview(filepath)
       return
     end
 
-    uv.fs_open(filepath, "r", 438, function(err, fd) 
+    uv.fs_open(filepath, "r", 438, function(err, fd)
       if err then return end
       uv.fs_read(fd, 4096, 0, function(err_read, data) 
         uv.fs_close(fd)
@@ -164,6 +164,18 @@ local function create_ui()
   vim.wo[state.win_preview].winhl = "NormalFloat:Normal"
   vim.bo[state.buf_preview].buftype = "nofile"
 
+  -- Scroll Preview Mappings (Power User Feature)
+  local function scroll_preview(direction)
+    if vim.api.nvim_win_is_valid(state.win_preview) then
+      vim.api.nvim_win_call(state.win_preview, function()
+        local key = direction > 0 and "<C-d>" or "<C-u>"
+        vim.cmd("normal! " .. vim.api.nvim_replace_termcodes(key, true, false, true))
+      end)
+    end
+  end
+  vim.keymap.set({"i", "n"}, "<C-d>", function() scroll_preview(1) end, { buffer = state.buf_list })
+  vim.keymap.set({"i", "n"}, "<C-u>", function() scroll_preview(-1) end, { buffer = state.buf_list })
+
   -- AUTO-CLOSE Logic: If list window closes, close preview
   vim.api.nvim_create_autocmd("WinClosed", {
     pattern = tostring(state.win_list),
@@ -179,7 +191,6 @@ local function create_ui()
     end
   })
 end
-
 -- 3. Filter & Render
 local function filter_and_render(query)
   if not vim.api.nvim_buf_is_valid(state.buf_list) then return end

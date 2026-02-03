@@ -44,11 +44,11 @@ local function draw()
     local entries = get_items(path)
     for _, item in ipairs(entries) do
       local prefix = "  " .. string.rep("  ", depth)
-      local icon = (item.type == "directory") and "> " or "  "
+      local icon = (item.type == "directory") and " " or "  "
       
       -- Open/Close indicators
       if item.type == "directory" and M.expanded[item.path] then
-        icon = "v "
+        icon = " "
       end
       
       table.insert(lines, prefix .. icon .. item.name)
