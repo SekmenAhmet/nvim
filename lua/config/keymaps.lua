@@ -55,3 +55,20 @@ vim.keymap.set("n", "<leader>X", close_all_buffers, { silent = true, desc = "Clo
 -- Supprimer le mot précédent en mode insert (Ctrl+Backspace)
 vim.keymap.set("i", "<C-BS>", "<C-W>", { desc = "Delete previous word" })
 vim.keymap.set("i", "<C-h>", "<C-W>", { desc = "Delete previous word" })
+
+-- Lazy Loading Triggers
+-- These load the module only when the key is pressed
+
+-- Finder (Leader ff)
+vim.keymap.set("n", "<leader>ff", function() require("config.finder").open() end, { desc = "Find Files (Native)" })
+
+-- Live Grep (Leader fg)
+vim.keymap.set("n", "<leader>fg", function() require("config.grep").open() end, { desc = "Live Grep (Native)" })
+
+-- Terminal (Ctrl+t)
+local function toggle_term() require("config.terminal").toggle() end
+vim.keymap.set({"n", "i", "t"}, "<C-t>", toggle_term, { desc = "Toggle terminal" })
+
+-- Netrw Tree (Ctrl+b)
+local function toggle_netrw() require("config.netrw").toggle() end
+vim.keymap.set({"n", "i", "v"}, "<C-b>", toggle_netrw, { silent = true, desc = "Toggle file tree" })

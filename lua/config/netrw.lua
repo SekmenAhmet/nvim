@@ -76,7 +76,7 @@ local function draw()
   vim.api.nvim_buf_set_option(M.buf, "modifiable", false)
 end
 
-local function toggle()
+function M.toggle()
   if M.win and vim.api.nvim_win_is_valid(M.win) then
     vim.api.nvim_win_close(M.win, true)
     M.win = nil
@@ -188,9 +188,7 @@ local function toggle()
   end)
 end
 
-vim.keymap.set("n", "<C-b>", toggle, { silent = true })
-vim.keymap.set("i", "<C-b>", toggle, { silent = true })
-vim.keymap.set("v", "<C-b>", toggle, { silent = true })
+-- Global Keymaps are now handled in lua/config/keymaps.lua for lazy loading
 
 -- Auto refresh on file save
 vim.api.nvim_create_autocmd("BufWritePost", {
@@ -201,3 +199,5 @@ vim.api.nvim_create_autocmd("BufWritePost", {
     end
   end
 })
+
+return M

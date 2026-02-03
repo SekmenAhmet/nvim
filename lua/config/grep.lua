@@ -42,14 +42,19 @@ function M.open()
   -- Indexé par numéro de ligne dans le buffer (à partir de 3)
   local grep_results = {}
 
+  -- Ignore patterns
+  local ignores_rg = "-g '!node_modules' -g '!__pycache__' -g '!target' -g '!build' -g '!dist' -g '!.venv' -g '!.git' -g '!*.md' -g '!*.json' -g '!*.lock' -g '!*.log'"
+  local ignores_git = "':(exclude)node_modules' ':(exclude)__pycache__' ':(exclude)target' ':(exclude)build' ':(exclude)dist' ':(exclude).venv' ':(exclude)*.md' ':(exclude)*.json' ':(exclude)*.lock' ':(exclude)*.log'"
+  local ignores_grep = "--exclude-dir=node_modules --exclude-dir=__pycache__ --exclude-dir=target --exclude-dir=build --exclude-dir=dist --exclude-dir=.venv --exclude-dir=.git --exclude=*.md --exclude=*.json --exclude=*.lock --exclude=*.log"
+
   -- Détecter l'outil disponible
   local cmd_base = nil
   if vim.fn.executable("rg") == 1 then
-    cmd_base = "rg --vimgrep --no-heading -g '!*.md' -g '!*.json' -g '!*.lock' -g '!*.log'"
+    cmd_base = "rg --vimgrep --no-heading " .. ignores_rg
   elseif vim.fn.executable("git") == 1 then
-    cmd_base = "git grep -n -- ':(exclude)*.md' ':(exclude)*.json' ':(exclude)*.lock' ':(exclude)*.log'"
+    cmd_base = "git grep -n -- " .. ignores_git
   elseif vim.fn.executable("grep") == 1 then
-    cmd_base = "grep -rnH --exclude-dir=.git --exclude=*.md --exclude=*.json --exclude=*.lock --exclude=*.log" 
+    cmd_base = "grep -rnH " .. ignores_grep 
   end
 
   -- Highlight syntaxique
@@ -60,9 +65,9 @@ function M.open()
       vim.fn.matchadd("Function", "^  .*$")
       -- Highlight du nom de fichier dans les résultats (ex: "  src/main.lua:10: code")
       -- Pattern: après le padding, jusqu'au premier ':'
-      vim.fn.matchadd("Directory", "^  [^:]\\+") 
+      vim.fn.matchadd("Directory", "^  [^:]\+") 
       -- Highlight du numéro de ligne
-      vim.fn.matchadd("Number", ":\\d\\+:") 
+      vim.fn.matchadd("Number", ":\d\+:") 
     end,
     once = true
   })
@@ -213,8 +218,5 @@ function M.open()
   vim.keymap.set("n", "<CR>", open_result, { buffer = buf })
   vim.keymap.set("i", "<CR>", open_result, { buffer = buf })
 end
-
--- Mapping global
-vim.keymap.set("n", "<leader>fg", M.open, { desc = "Live Grep (Native)" })
 
 return M

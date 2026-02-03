@@ -36,4 +36,30 @@ vim.api.nvim_create_autocmd("BufReadPost", {
   end,
   desc = "Restore cursor position on file open",
 })
+
+-- 4. Auto-open single file in directory
+vim.api.nvim_create_autocmd("VimEnter", {
+  callback = function()
+    -- Only run if no arguments were passed (opening directory)
+    if vim.fn.argc() == 0 then
+      local cwd = vim.loop.cwd()
+      local handle = vim.loop.fs_scandir(cwd)
+      local files = {}
+      if handle then
+        while true do
+          local name, type = vim.loop.fs_scandir_next(handle)
+          if not name then break end
+          if not name:match("^%.") then
+            table.insert(files, {name=name, type=type})
+          end
+        end
+      end
+      
+      if #files == 1 and files[1].type == "file" then
+        vim.cmd("edit " .. files[1].name)
+      end
+    end
+  end,
+  desc = "Auto open single file",
+})
   

@@ -3,6 +3,18 @@
 
 local M = {}
 
+-- Ignore list
+local ignored_dirs = {
+  ["node_modules"] = true,
+  [".git"] = true,
+  [".venv"] = true,
+  ["__pycache__"] = true,
+  ["target"] = true,
+  ["build"] = true,
+  ["dist"] = true,
+  ["vendor"] = true,
+}
+
 -- Pure Lua recursive file scanner (Replaces 'find'/'sed')
 local function get_files(path)
   local files = {}
@@ -13,8 +25,8 @@ local function get_files(path)
     local name, type = vim.loop.fs_scandir_next(handle)
     if not name then break end
     
-    -- Ignore dotfiles/dotdirs
-    if not name:match("^%.") then
+    -- Ignore dotfiles/dotdirs and specific ignored dirs
+    if not name:match("^%.") and not ignored_dirs[name] then
       local rel_path = path == "." and name or (path .. "/" .. name)
       
       if type == "directory" then
@@ -158,7 +170,5 @@ function M.open()
   vim.keymap.set("n", "<CR>", open_file, { buffer = buf })
   vim.keymap.set("i", "<CR>", open_file, { buffer = buf })
 end
-
-vim.keymap.set("n", "<leader>ff", M.open, { desc = "Find Files (Native)" })
 
 return M

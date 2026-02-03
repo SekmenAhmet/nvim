@@ -37,7 +37,24 @@ function M.toggle()
 
   -- Setup terminal if buffer is empty (newly created)
   if vim.bo[terminal_buf].channel == 0 then
-    vim.fn.termopen(vim.o.shell, {
+    -- Determine shell based on OS
+    local shell = vim.o.shell
+    local is_windows = vim.loop.os_uname().version:find("Windows") or vim.fn.has("win32") == 1
+
+    if is_windows then
+      if vim.fn.executable("pwsh") == 1 then
+        shell = "pwsh"
+      elseif vim.fn.executable("powershell") == 1 then
+        shell = "powershell"
+      end
+    else
+      -- Linux/Unix: Prefer fish if available
+      if vim.fn.executable("fish") == 1 then
+        shell = "fish"
+      end
+    end
+
+    vim.fn.termopen(shell, {
       cwd = vim.fn.getcwd(),
       on_exit = function()
         terminal_buf = nil
@@ -61,13 +78,5 @@ function M.toggle()
   vim.keymap.set("n", "q", M.toggle, opts)
   vim.keymap.set("n", "<Esc>", M.toggle, opts) -- Allow closing with Esc in Normal mode
 end
-
--- Global Keymaps
--- Changed from <C-:> to <C-t> for better compatibility
-vim.keymap.set("n", "<C-t>", M.toggle, { desc = "Toggle terminal" })
-vim.keymap.set("i", "<C-t>", M.toggle, { desc = "Toggle terminal" })
-vim.keymap.set("t", "<C-t>", M.toggle, { desc = "Toggle terminal" })
-
-vim.api.nvim_create_user_command("ToggleTerm", M.toggle, {})
 
 return M
