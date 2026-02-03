@@ -1,58 +1,59 @@
 local M = {}
 
+-- Apparence du menu
+vim.opt.completeopt = "menu,menuone,noinsert,noselect"
 vim.opt.pumblend = 10
-vim.opt.pumheight = 15
+vim.opt.pumheight = 10
 
-vim.api.nvim_set_hl(0, "Pmenu", { bg = "#1e1e1e", fg = "#d4d4d4" })
-vim.api.nvim_set_hl(0, "PmenuSel", { bg = "#073655", fg = "#ffffff", bold = true })
-vim.api.nvim_set_hl(0, "PmenuSbar", { bg = "#2d2d2d" })
-vim.api.nvim_set_hl(0, "PmenuThumb", { bg = "#569cd6" })
-vim.api.nvim_set_hl(0, "CmpItemAbbr", { fg = "#d4d4d4" })
-vim.api.nvim_set_hl(0, "CmpItemAbbrDeprecated", { fg = "#808080", strikethrough = true })
-vim.api.nvim_set_hl(0, "CmpItemAbbrMatch", { fg = "#569cd6", bold = true })
-vim.api.nvim_set_hl(0, "CmpItemKind", { fg = "#4ec9b0" })
-vim.api.nvim_set_hl(0, "CmpItemMenu", { fg = "#6a9955", italic = true })
+-- Couleurs (Native, utilise le colorscheme actuel)
+-- Pas besoin de redéfinir si le thème est bon, mais on assure la lisibilité
+vim.api.nvim_set_hl(0, "Pmenu", { link = "NormalFloat" })
+vim.api.nvim_set_hl(0, "PmenuSel", { link = "Visual" })
 
-local function setup_mappings()
-  local function map(mode, lhs, rhs, opts)
-    opts = opts or {}
-    vim.keymap.set(mode, lhs, rhs, opts)
+-- Auto-Trigger Logic (The "Native Autocomplete" trick)
+-- Lance la complétion automatiquement après 2 caractères
+local function check_trigger()
+  -- Désactiver pour les buffers spéciaux (Finder, Grep, etc.)
+  if vim.bo.buftype == "nofile" or vim.bo.buftype == "prompt" then return end
+  local ft = vim.bo.filetype
+  if ft == "fzf_list" or ft == "grep_list" or ft == "TelescopePrompt" then return end
+
+  local col = vim.fn.col('.') - 1
+  if col < 2 then return end
+  
+  local line = vim.api.nvim_get_current_line()
+  local char_before = line:sub(col, col)
+  
+  -- Ne pas déclencher si on vient de taper un espace ou un symbole
+  if char_before:match("%W") then return end
+  
+  -- Si le menu n'est pas visible, on lance <C-n>
+  if vim.fn.pumvisible() == 0 then
+    vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes("<C-n>", true, false, true), "n", false)
   end
-
-  map("i", "<Up>", function()
-    if vim.fn.pumvisible() == 1 then
-      return "<C-p>"
-    end
-    return "<Up>"
-  end, { expr = true, desc = "Previous completion or up" })
-  map("i", "<Down>", function()
-    if vim.fn.pumvisible() == 1 then
-      return "<C-n>"
-    end
-    return "<Down>"
-  end, { expr = true, desc = "Next completion or down" })
-  map("i", "<CR>", function()
-    if vim.fn.pumvisible() == 1 then
-      return "<C-y>"
-    end
-    return "<CR>"
-  end, { expr = true, desc = "Confirm completion" })
-  map("i", "<Tab>", function()
-    if vim.fn.pumvisible() == 1 then
-      return "<C-n>"
-    end
-    return "<Tab>"
-  end, { expr = true, desc = "Next completion or tab" })
-  map("i", "<S-Tab>", function()
-    if vim.fn.pumvisible() == 1 then
-      return "<C-p>"
-    end
-    return "<S-Tab>"
-  end, { expr = true, desc = "Previous completion or shift-tab" })
 end
 
-setup_mappings()
+-- Debounce timer pour ne pas spammer <C-n> à chaque frappe
+local timer = nil
+vim.api.nvim_create_autocmd("TextChangedI", {
+  callback = function()
+    if timer then timer:stop() end
+    timer = vim.loop.new_timer()
+    timer:start(100, 0, vim.schedule_wrap(check_trigger))
+  end
+})
 
+-- Mappings de navigation confortables
+local function map(lhs, rhs)
+  vim.keymap.set("i", lhs, rhs, { expr = true, silent = true })
+end
+
+-- <Tab> pour descendre ou valider
+map("<Tab>", 'pumvisible() ? "<C-n>" : "<Tab>"')
+map("<S-Tab>", 'pumvisible() ? "<C-p>" : "<S-Tab>"')
+map("<CR>", 'pumvisible() ? "<C-y>" : "<CR>"')
+
+-- Setup Lsp Attach
 vim.api.nvim_create_autocmd("LspAttach", {
   callback = function(event)
     local client = vim.lsp.get_client_by_id(event.data.client_id)
@@ -61,26 +62,5 @@ vim.api.nvim_create_autocmd("LspAttach", {
     end
   end,
 })
-
-function M.test_completion()
-  local has_lsp = false
-  for _, client in ipairs(vim.lsp.get_clients()) do
-    if client.server_capabilities.completionProvider then
-      has_lsp = true
-      print("LSP client avec completion: " .. client.name)
-    end
-  end
-  if not has_lsp then
-    print("Aucun LSP avec complétion trouvé")
-  end
-end
-
-vim.api.nvim_create_user_command("TestLSP", function()
-  M.test_completion()
-end, {})
-
-vim.keymap.set("n", "<leader>tl", function()
-  M.test_completion()
-end, { desc = "Test LSP completion" })
 
 return M

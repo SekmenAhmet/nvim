@@ -1,222 +1,377 @@
--- Native Live Grep (Leader fg)
--- Zero plugins, pure Lua + 'grep'/'rg' command
+-- Native Live Grep with Preview (Async & Non-blocking)
+-- Architecture: Async Spawn (libuv) + Dual Window UI
 
 local M = {}
+local uv = vim.loop
 
--- Configuration de la fenêtre flottante (Identique au Finder)
-local function create_window()
-  local width = math.floor(vim.o.columns * 0.8)
-  local height = math.floor(vim.o.lines * 0.8)
-  local row = math.floor(vim.o.lines * 0.1) -- Position higher
-  local col = math.floor((vim.o.columns - width) / 2)
+-- Configuration
+local CONFIG = {
+  width_pct = 0.9,
+  height_pct = 0.8,
+  preview_width_pct = 0.5,
+  batch_size = 50, -- Updates frequents
+}
 
-  local buf = vim.api.nvim_create_buf(false, true)
+-- État global
+local state = {
+  buf_list = nil,
+  win_list = nil,
+  buf_preview = nil,
+  win_preview = nil,
+  job_handle = nil,
+  results = {}, -- { {filename, lnum, text}, ... }
+  timer_debounce = nil,
+  timer_preview = nil,
+  last_query = "",
+  last_preview_key = nil,
+}
 
-  local win = vim.api.nvim_open_win(buf, true, {
+-- Ignore patterns
+local function get_ignore_args()
+  local common_ignores = {
+    "node_modules", ".git", ".venv", "__pycache__", "target", "build", "dist",
+    ".next", ".nuxt", ".output", "out", "coverage", ".npm", ".yarn",
+    ".idea", ".vscode", ".DS_Store", "thumbs.db", "tmp", "temp", "vendor", "logs"
+  }
+  
+  local args = {}
+  for _, ignore in ipairs(common_ignores) do
+    table.insert(args, "--glob")
+    table.insert(args, "!" .. ignore)
+  end
+  
+  local ext_ignores = { "*.lock", "*.log", "*.min.js", "*.map", "*.jpg", "*.png", "*.gif", "*.svg", "*.mp4", "*.zip", "*.tar.gz", "*.pdf" }
+  for _, ext in ipairs(ext_ignores) do
+    table.insert(args, "--glob")
+    table.insert(args, "!" .. ext)
+  end
+  
+  return args
+end
+
+-- 1. Preview Logic
+local function update_preview(filename, lnum)
+  if not filename or filename == "" then 
+     if vim.api.nvim_buf_is_valid(state.buf_preview) then
+       vim.api.nvim_buf_set_lines(state.buf_preview, 0, -1, false, {})
+     end
+     return 
+  end
+  
+  lnum = tonumber(lnum) or 1
+  local key = filename .. ":" .. lnum
+  if state.last_preview_key == key then return end
+  state.last_preview_key = key
+  
+  if state.timer_preview then state.timer_preview:stop() end
+  state.timer_preview = uv.new_timer()
+  
+  state.timer_preview:start(20, 0, vim.schedule_wrap(function()
+    if not vim.api.nvim_buf_is_valid(state.buf_preview) then return end
+    
+    local stat = uv.fs_stat(filename)
+    if not stat or stat.type ~= "file" then 
+       vim.api.nvim_buf_set_lines(state.buf_preview, 0, -1, false, { " [File not found] " })
+       return
+    end
+
+    if stat.size > 200 * 1024 then
+       vim.api.nvim_buf_set_lines(state.buf_preview, 0, -1, false, { " [File too large] " })
+       return
+    end
+
+    uv.fs_open(filename, "r", 438, function(err, fd)
+      if err then return end
+      uv.fs_read(fd, stat.size, 0, function(err_read, data) 
+        uv.fs_close(fd)
+        if err_read then return end
+        
+        vim.schedule(function()
+          if not vim.api.nvim_buf_is_valid(state.buf_preview) then return end
+          local lines = vim.split(data or "", "\n")
+          
+          vim.api.nvim_buf_set_lines(state.buf_preview, 0, -1, false, lines)
+          
+          local ext = filename:match("^.+%.(.+)$")
+          if ext then vim.bo[state.buf_preview].filetype = ext end
+          
+          pcall(vim.api.nvim_win_set_cursor, state.win_preview, {lnum, 0})
+          vim.api.nvim_win_call(state.win_preview, function() vim.cmd("normal! zz") end)
+          
+          -- Highlight match
+          vim.api.nvim_buf_add_highlight(state.buf_preview, -1, "Search", lnum - 1, 0, -1)
+        end)
+      end)
+    end)
+  end))
+end
+
+-- 2. Render List
+local function render_list(query)
+  if not vim.api.nvim_buf_is_valid(state.buf_list) then return end
+  
+  -- SORT RESULTS for stability
+  -- Prevents items from "dancing" when rg sends them out of order
+  table.sort(state.results, function(a, b)
+    if a.filename == b.filename then
+      return (tonumber(a.lnum) or 0) < (tonumber(b.lnum) or 0)
+    else
+      return a.filename < b.filename
+    end
+  end)
+  
+  local padding = "  "
+  local display_lines = {}
+  
+  -- Header
+  table.insert(display_lines, padding .. query)
+  table.insert(display_lines, padding .. string.rep("─", vim.api.nvim_win_get_width(state.win_list) - 4))
+  
+  if #state.results == 0 then
+    table.insert(display_lines, padding .. (query == "" and "-- Type to search --" or "-- No results --"))
+  else
+    for i, res in ipairs(state.results) do
+      if i > 200 then break end
+      local line_str = string.format("%s %s:%s: %s", padding, res.filename, res.lnum, res.text)
+      table.insert(display_lines, line_str)
+    end
+  end
+  
+  vim.api.nvim_buf_set_lines(state.buf_list, 0, -1, false, display_lines)
+  
+  -- Restore Input Cursor
+  if vim.api.nvim_get_mode().mode == 'i' then
+      vim.api.nvim_win_set_cursor(state.win_list, {1, #padding + #query})
+  end
+  
+  -- AUTO PREVIEW FIRST RESULT
+  if #state.results > 0 then
+      update_preview(state.results[1].filename, state.results[1].lnum)
+  else
+      update_preview(nil)
+  end
+end
+
+-- 3. Async Search Engine
+local function start_grep(query)
+  if query == "" then 
+    state.results = {}
+    render_list(query)
+    return 
+  end
+  
+  if state.job_handle and not state.job_handle:is_closing() then
+    state.job_handle:close()
+  end
+  
+  state.results = {}
+  
+  local cmd = "grep"
+  local args = { "-rnH", query, "." } 
+  
+  if vim.fn.executable("rg") == 1 then
+    cmd = "rg"
+    args = { "--vimgrep", "--no-heading", "--smart-case" }
+    local ignore_args = get_ignore_args()
+    for _, v in ipairs(ignore_args) do table.insert(args, v) end
+    table.insert(args, query)
+    table.insert(args, ".")
+  end
+  
+  local stdout = uv.new_pipe(false)
+  local stderr = uv.new_pipe(false)
+  
+  state.job_handle = uv.spawn(cmd, {
+    args = args,
+    stdio = { nil, stdout, stderr },
+  }, function() 
+    stdout:read_stop()
+    stderr:read_stop()
+    stdout:close()
+    stderr:close()
+    if state.job_handle then state.job_handle:close() end
+  end)
+  
+  local buffer = ""
+  local count = 0
+  
+  stdout:read_start(function(err, data)
+    assert(not err, err)
+    if data then
+      buffer = buffer .. data
+      local lines = vim.split(buffer, "\n")
+      buffer = lines[#lines]
+      lines[#lines] = nil
+      
+      local needs_render = false
+      for _, line in ipairs(lines) do
+        if line ~= "" and count < 500 then
+           local parts = vim.split(line, ":")
+           if #parts >= 4 then
+             local filename = parts[1]
+             local lnum = parts[2]
+             local text = table.concat(parts, ":", 4)
+             table.insert(state.results, { filename = filename, lnum = lnum, text = text })
+             count = count + 1
+             needs_render = true
+           end
+        end
+      end
+      
+      if needs_render and count % CONFIG.batch_size == 0 then
+        vim.schedule(function() render_list(query) end)
+      end
+    else
+      -- End of stream
+      vim.schedule(function() render_list(query) end)
+    end
+  end)
+end
+
+-- 4. Create UI
+local function create_ui()
+  local total_width = math.floor(vim.o.columns * CONFIG.width_pct)
+  local total_height = math.floor(vim.o.lines * CONFIG.height_pct)
+  local row = math.floor((vim.o.lines - total_height) / 2)
+  local col = math.floor((vim.o.columns - total_width) / 2)
+
+  local preview_width = math.floor(total_width * CONFIG.preview_width_pct)
+  local list_width = total_width - preview_width - 2
+
+  state.buf_list = vim.api.nvim_create_buf(false, true)
+  state.win_list = vim.api.nvim_open_win(state.buf_list, true, {
     relative = "editor",
-    width = width,
-    height = height,
+    width = list_width,
+    height = total_height,
     row = row,
     col = col,
     style = "minimal",
     border = "rounded",
     title = " Live Grep ",
-    title_pos = "center",
+  })
+  
+  -- Set Filetype for completion exclusion
+  vim.bo[state.buf_list].filetype = "grep_list"
+
+  state.buf_preview = vim.api.nvim_create_buf(false, true)
+  state.win_preview = vim.api.nvim_open_win(state.buf_preview, false, {
+    relative = "editor",
+    width = preview_width,
+    height = total_height,
+    row = row,
+    col = col + list_width + 2,
+    style = "minimal",
+    border = "rounded",
+    title = " Preview ",
   })
 
-  vim.wo[win].cursorline = true
-  vim.wo[win].winhl = "NormalFloat:Normal,CursorLine:Visual"
-
-  vim.bo[buf].filetype = "custom_grep"
-  vim.bo[buf].buftype = "nofile"
+  vim.wo[state.win_list].cursorline = true
+  vim.wo[state.win_list].winhl = "NormalFloat:Normal,CursorLine:Visual"
+  vim.bo[state.buf_list].buftype = "nofile"
+  -- Menu-like behavior
+  vim.wo[state.win_list].cursorcolumn = false
+  vim.wo[state.win_list].wrap = false
   
-  return buf, win
+  vim.wo[state.win_preview].winhl = "NormalFloat:Normal"
+  vim.bo[state.buf_preview].buftype = "nofile"
+  vim.wo[state.win_preview].number = true
+  
+  -- AUTO-CLOSE Logic
+  vim.api.nvim_create_autocmd("WinClosed", {
+    pattern = tostring(state.win_list),
+    once = true,
+    callback = function()
+      if state.win_preview and vim.api.nvim_win_is_valid(state.win_preview) then
+        vim.api.nvim_win_close(state.win_preview, true)
+      end
+      if state.job_handle and not state.job_handle:is_closing() then
+         state.job_handle:close()
+      end
+    end
+  })
 end
 
+-- 5. Main
 function M.open()
-  local buf, win = create_window()
-  local padding = "  "
-  local timer = vim.loop.new_timer()
-  
-  -- Table pour stocker les résultats bruts (filename, lnum, text)
-  -- Indexé par numéro de ligne dans le buffer (à partir de 3)
-  local grep_results = {}
-
-  -- Ignore patterns
-  local ignores_rg = "-g '!node_modules' -g '!__pycache__' -g '!target' -g '!build' -g '!dist' -g '!.venv' -g '!.git' -g '!*.md' -g '!*.json' -g '!*.lock' -g '!*.log'"
-  local ignores_git = "':(exclude)node_modules' ':(exclude)__pycache__' ':(exclude)target' ':(exclude)build' ':(exclude)dist' ':(exclude).venv' ':(exclude)*.md' ':(exclude)*.json' ':(exclude)*.lock' ':(exclude)*.log'"
-  local ignores_grep = "--exclude-dir=node_modules --exclude-dir=__pycache__ --exclude-dir=target --exclude-dir=build --exclude-dir=dist --exclude-dir=.venv --exclude-dir=.git --exclude=*.md --exclude=*.json --exclude=*.lock --exclude=*.log"
-
-  -- Détecter l'outil disponible
-  local cmd_base = nil
-  if vim.fn.executable("rg") == 1 then
-    cmd_base = "rg --vimgrep --no-heading " .. ignores_rg
-  elseif vim.fn.executable("git") == 1 then
-    cmd_base = "git grep -n -- " .. ignores_git
-  elseif vim.fn.executable("grep") == 1 then
-    cmd_base = "grep -rnH " .. ignores_grep 
-  end
-
-  -- Highlight syntaxique
-  vim.api.nvim_create_autocmd("BufEnter", {
-    buffer = buf,
-    callback = function()
-      vim.fn.matchadd("Comment", "^  ─.*$")
-      vim.fn.matchadd("Function", "^  .*$")
-      -- Highlight du nom de fichier dans les résultats (ex: "  src/main.lua:10: code")
-      -- Pattern: après le padding, jusqu'au premier ':'
-      vim.fn.matchadd("Directory", "^  [^:]\+") 
-      -- Highlight du numéro de ligne
-      vim.fn.matchadd("Number", ":\d\+:") 
-    end,
-    once = true
-  })
-
-  -- Fonction d'affichage
-  local function update_view(query, output_lines)
-    if not vim.api.nvim_win_is_valid(win) then return end
-    local display_lines = {}
-    
-    -- Ligne 1 : Input
-    table.insert(display_lines, padding .. query)
-    -- Ligne 2 : Séparateur
-    table.insert(display_lines, padding .. string.rep("─", vim.api.nvim_win_get_width(win) - 6))
-    
-    -- Reset des résultats
-    grep_results = {}
-
-    if not cmd_base then
-       table.insert(display_lines, padding .. "Error: No grep tool found (install ripgrep or git)")
-    elseif query == "" then
-      table.insert(display_lines, padding .. "-- Type to search --")
-    else
-      if #output_lines == 0 then
-        table.insert(display_lines, padding .. "-- No results --")
-      else
-        for i, line in ipairs(output_lines) do
-          if i > 200 then break end -- Limite d'affichage
-          -- Parsing basique: file:line:text
-          -- On stocke le résultat pour pouvoir l'ouvrir plus tard
-          -- line format: "path/to/file:123:match text"
-          local parts = vim.split(line, ":")
-          if #parts >= 3 then
-             local filename = parts[1]
-             local lnum = parts[2]
-             -- Reconstruire le texte (au cas où il y a des : dedans)
-             local text = table.concat(parts, ":", 3)
-             
-             table.insert(grep_results, { filename = filename, lnum = lnum })
-             table.insert(display_lines, padding .. line)
-          end
-        end
-      end
-    end
-
-    vim.api.nvim_buf_set_lines(buf, 0, -1, false, display_lines)
-
-    -- Remettre le curseur en haut
-    if vim.api.nvim_get_mode().mode == 'i' then
-        vim.api.nvim_win_set_cursor(win, {1, #padding + #query})
-    end
-  end
-
-  -- Exécution différée (Debounce)
-  local function trigger_grep(query)
-    timer:stop()
-    timer:start(300, 0, vim.schedule_wrap(function()
-      if not vim.api.nvim_buf_is_valid(buf) then return end
-      
-      if not cmd_base then
-        update_view(query, {})
-        return
-      end
-
-      if query == "" then
-        update_view("", {})
-        return
-      end
-      
-      -- Nettoyer la query pour le shell (très basique)
-      local safe_query = query:gsub('"', '\\"')
-      
-      -- Exécuter la commande (limité à 200 résultats pour la perf)
-      -- On utilise shell pipe head si dispo, sinon on coupe en Lua
-      local cmd = cmd_base .. ' "' .. safe_query .. '" .'
-      if vim.fn.executable("head") == 1 then
-         cmd = cmd .. " | head -n 200"
-      end
-
-      local output = vim.fn.systemlist(cmd)
-      
-      -- Fallback limit if head not available
-      if #output > 200 then
-         local limited = {}
-         for i=1, 200 do limited[i] = output[i] end
-         output = limited
-      end
-      
-      update_view(query, output)
-    end))
-  end
-
-  -- Initialisation
-  update_view("", {})
+  create_ui()
+  render_list("")
   vim.cmd("startinsert")
-
-  -- Event: Changement de texte
+  
+  -- Input Handler
   vim.api.nvim_create_autocmd("TextChangedI", {
-    buffer = buf,
+    buffer = state.buf_list,
     callback = function()
-      local cursor = vim.api.nvim_win_get_cursor(win)
+      local cursor = vim.api.nvim_win_get_cursor(state.win_list)
       if cursor[1] == 1 then
-          local line = vim.api.nvim_buf_get_lines(buf, 0, 1, false)[1]
-          local query = line:sub(#padding + 1)
-          trigger_grep(query)
+        local line = vim.api.nvim_buf_get_lines(state.buf_list, 0, 1, false)[1]
+        local query = line:sub(3) -- Skip padding
+        
+        if state.timer_debounce then state.timer_debounce:stop() end
+        state.timer_debounce = uv.new_timer()
+        state.timer_debounce:start(100, 0, vim.schedule_wrap(function()
+          start_grep(query)
+        end))
       end
     end
   })
-
+  
+  -- Cursor Move (Manual Preview)
+  vim.api.nvim_create_autocmd({"CursorMoved", "CursorMovedI"}, {
+    buffer = state.buf_list,
+    callback = function()
+      local cursor = vim.api.nvim_win_get_cursor(state.win_list)
+      local row = cursor[1]
+      
+      if row >= 3 then
+        local idx = row - 2
+        local res = state.results[idx]
+        if res then update_preview(res.filename, res.lnum) end
+      elseif row == 1 and #state.results > 0 then
+         update_preview(state.results[1].filename, state.results[1].lnum)
+      end
+    end
+  })
+  
+  -- Actions
+  local function close()
+    if vim.api.nvim_win_is_valid(state.win_list) then 
+      vim.api.nvim_win_close(state.win_list, true) 
+    end
+  end
+  
+  local function open_result()
+    local cursor = vim.api.nvim_win_get_cursor(state.win_list)
+    local idx
+    if cursor[1] == 1 then idx = 1 else idx = cursor[1] - 2 end
+    
+    local res = state.results[idx]
+    if res then
+      close()
+      require("config.ui").open_in_normal_win(res.filename, res.lnum)
+    end
+  end
+  
+  local opts = { buffer = state.buf_list }
+  vim.keymap.set({"i", "n"}, "<Esc>", close, opts)
+  vim.keymap.set({"i", "n"}, "<CR>", open_result, opts)
+  
   -- Navigation
   vim.keymap.set("i", "<Down>", function()
     vim.cmd("stopinsert")
-    if vim.api.nvim_buf_line_count(buf) >= 3 then
-      vim.api.nvim_win_set_cursor(win, {3, 0})
-    end
-  end, { buffer = buf })
-
+    if #state.results > 0 then vim.api.nvim_win_set_cursor(state.win_list, {3, 0}) end
+  end, opts)
+  
   vim.keymap.set("n", "<Up>", function()
-    local cursor = vim.api.nvim_win_get_cursor(win)
+    local cursor = vim.api.nvim_win_get_cursor(state.win_list)
     if cursor[1] <= 3 then
-      vim.api.nvim_win_set_cursor(win, {1, 0})
+      vim.api.nvim_win_set_cursor(state.win_list, {1, 0})
       vim.cmd("startinsert")
-      local line = vim.api.nvim_buf_get_lines(buf, 0, 1, false)[1]
-      vim.api.nvim_win_set_cursor(win, {1, #line})
+      local line = vim.api.nvim_buf_get_lines(state.buf_list, 0, 1, false)[1]
+      vim.api.nvim_win_set_cursor(state.win_list, {1, #line})
     else
       vim.cmd("normal! k")
     end
-  end, { buffer = buf })
-
-  -- Action: Ouvrir
-  local function open_result()
-    local cursor_row = vim.api.nvim_win_get_cursor(win)[1]
-    -- Les résultats commencent à la ligne 3
-    -- L'index dans grep_results est : cursor_row - 2
-    local result_index = cursor_row - 2
-    local result = grep_results[result_index]
-
-    if result then
-      vim.api.nvim_win_close(win, true)
-      require("config.ui").open_in_normal_win(result.filename, result.lnum)
-    end
-  end
-
-  -- Quitter
-  vim.keymap.set("n", "<Esc>", function() vim.api.nvim_win_close(win, true) end, { buffer = buf })
-  vim.keymap.set("i", "<Esc>", function() vim.api.nvim_win_close(win, true) end, { buffer = buf })
-
-  -- Valider
-  vim.keymap.set("n", "<CR>", open_result, { buffer = buf })
-  vim.keymap.set("i", "<CR>", open_result, { buffer = buf })
+  end, opts)
 end
 
 return M

@@ -53,10 +53,16 @@ function M.render()
   local modified = "%m"  -- [+] si modifié
   local line_col = "%l:%c" -- Ligne:Colonne
   local percentage = "%p%%" -- Pourcentage
+  
+  -- Startup Time (si disponible)
+  local startup = ""
+  if vim.g.startup_time then
+    startup = string.format(" ⚡ %.1fms ", vim.g.startup_time)
+  end
 
   return string.format(
-    "%%#%s# %s %%*%%#Comment#%s%%* %%#Normal#%s%s %%= %%#CursorLineNr# %s │ %s ",
-    mode_hl, mode_name, git, file_name, modified, line_col, percentage
+    "%%#%s# %s %%*%%#Comment#%s%%* %%#Normal#%s%s %%= %%#CursorLineNr# %s │ %s%%#Comment#%s",
+    mode_hl, mode_name, git, file_name, modified, line_col, percentage, startup
   )
 end
 

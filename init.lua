@@ -29,7 +29,7 @@ require("config.keymaps") -- Keymaps now handle lazy loading triggers
 require("config.moves")
 require("config.statusline")
 require("config.tabline")
-require("config.highlights")
+-- require("config.highlights") -- Remplacé par Treesitter
 
 -- Defer non-critical modules to unblock UI painting
 vim.schedule(function()
@@ -41,18 +41,23 @@ vim.schedule(function()
   
   -- Still load these as they might have autocommands or setup
   require("config.ui")
-  require("config.autopairs")
-  require("config.completion")
   require("config.autocmds")
   
   -- Startup time report
   local end_time = vim.loop.hrtime()
   local startup_ms = (end_time - start_time) / 1e6
+  vim.g.startup_time = startup_ms -- Global variable for statusline
   
   vim.api.nvim_create_user_command("StartupTime", function()
     print(string.format("⚡ Neovim chargé en %.2f ms", startup_ms))
   end, {})
-
-  -- Optional: Silent startup or print
-  -- print(string.format("⚡ Neovim chargé en %.2f ms", startup_ms))
 end)
+
+-- Lazy load interaction heavy modules on InsertEnter
+vim.api.nvim_create_autocmd("InsertEnter", {
+  once = true,
+  callback = function()
+    require("config.autopairs")
+    require("config.completion")
+  end
+})

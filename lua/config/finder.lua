@@ -1,174 +1,377 @@
--- Native Fuzzy Finder (Leader ff)
--- Zero plugins, pure Lua (Cross-platform)
+-- Native Async Finder with Preview
+-- Architecture: Async Spawn (libuv) + Dual Window UI
 
 local M = {}
+local uv = vim.loop
 
--- Ignore list
-local ignored_dirs = {
-  ["node_modules"] = true,
-  [".git"] = true,
-  [".venv"] = true,
-  ["__pycache__"] = true,
-  ["target"] = true,
-  ["build"] = true,
-  ["dist"] = true,
-  ["vendor"] = true,
+-- Configuration
+local CONFIG = {
+  width_pct = 0.9,
+  height_pct = 0.8,
+  preview_width_pct = 0.5,
+  batch_size = 200, 
 }
 
--- Pure Lua recursive file scanner (Replaces 'find'/'sed')
-local function get_files(path)
-  local files = {}
-  local handle = vim.loop.fs_scandir(path)
-  if not handle then return {} end
+-- État global
+local state = {
+  buf_list = nil,
+  win_list = nil,
+  buf_preview = nil,
+  win_preview = nil,
+  job_handle = nil,
+  files = {}, -- Raw list of all files
+  filtered_files = {}, -- Displayed files
+  preview_timer = nil,
+  last_preview_file = nil,
+}
 
-  while true do
-    local name, type = vim.loop.fs_scandir_next(handle)
-    if not name then break end
-    
-    -- Ignore dotfiles/dotdirs and specific ignored dirs
-    if not name:match("^%.") and not ignored_dirs[name] then
-      local rel_path = path == "." and name or (path .. "/" .. name)
-      
-      if type == "directory" then
-        -- Recurse
-        local sub_files = get_files(rel_path)
-        for _, f in ipairs(sub_files) do
-          table.insert(files, f)
-        end
-      elseif type == "file" then
-        table.insert(files, rel_path)
-      end
-    end
-  end
-  return files
+-- Ignore list for 'find' fallback
+local ignore_list = {
+  "-not -path '*/.*'",
+  "-not -path '*/node_modules/*'",
+  "-not -path '*/target/*'",
+  "-not -path '*/build/*'",
+  "-not -path '*/dist/*'",
+  "-not -path '*/__pycache__/*'",
+  "-not -path '*/venv/*'",
+}
+
+-- Smart Scoring Algorithm
+local function score_file(file, query_lower)
+  local file_lower = file:lower()
+  -- Extract filename from path
+  local filename = file_lower:match("^.+/(.+)$") or file_lower
+  
+  -- 1. Exact filename match (Best)
+  if filename == query_lower then return 100 end
+  
+  -- 2. Filename starts with query
+  if vim.startswith(filename, query_lower) then return 80 end
+  
+  -- 3. Filename contains query
+  if filename:find(query_lower, 1, true) then return 60 end
+  
+  -- 4. Path contains query
+  if file_lower:find(query_lower, 1, true) then return 40 end
+  
+  -- 5. Fuzzy / Acronym (Optional, simple implementation)
+  -- If query is "mc", matches "main_controller"
+  -- Skipped for now to keep it fast, unless requested.
+  
+  return 0
 end
 
--- Configuration de la fenêtre flottante
-local function create_window()
-  local width = math.floor(vim.o.columns * 0.8)
-  local height = math.floor(vim.o.lines * 0.8)
-  local row = math.floor(vim.o.lines * 0.1) -- 10% from top
-  local col = math.floor((vim.o.columns - width) / 2)
+-- 1. Preview Logic
+local function update_preview(filepath)
+  if not filepath or filepath == "" then 
+    if vim.api.nvim_buf_is_valid(state.buf_preview) then
+       vim.api.nvim_buf_set_lines(state.buf_preview, 0, -1, false, {})
+    end
+    return 
+  end
+  
+  if state.last_preview_file == filepath then return end
+  state.last_preview_file = filepath
 
-  local buf = vim.api.nvim_create_buf(false, true)
+  if state.preview_timer then state.preview_timer:stop() end
+  state.preview_timer = uv.new_timer()
+  
+  state.preview_timer:start(10, 0, vim.schedule_wrap(function()
+    if not vim.api.nvim_buf_is_valid(state.buf_preview) then return end
+    
+    local stat = uv.fs_stat(filepath)
+    if not stat or stat.type ~= "file" then 
+      vim.api.nvim_buf_set_lines(state.buf_preview, 0, -1, false, { " [Directory or Not Found] " })
+      return
+    end
 
-  local win = vim.api.nvim_open_win(buf, true, {
+    if stat.size > 200 * 1024 then
+      vim.api.nvim_buf_set_lines(state.buf_preview, 0, -1, false, { " [File too large] " })
+      return
+    end
+
+    uv.fs_open(filepath, "r", 438, function(err, fd) 
+      if err then return end
+      uv.fs_read(fd, 4096, 0, function(err_read, data) 
+        uv.fs_close(fd)
+        if err_read then return end
+        
+        vim.schedule(function()
+          if not vim.api.nvim_buf_is_valid(state.buf_preview) then return end
+          local lines = vim.split(data or "", "\n")
+          if #lines > 100 then lines = { unpack(lines, 1, 100) } end
+          
+          vim.api.nvim_buf_set_lines(state.buf_preview, 0, -1, false, lines)
+          
+          local ext = filepath:match("^.+%.(.+)$")
+          if ext then vim.bo[state.buf_preview].filetype = ext end
+        end)
+      end)
+    end)
+  end))
+end
+
+-- 2. Create UI
+local function create_ui()
+  local total_width = math.floor(vim.o.columns * CONFIG.width_pct)
+  local total_height = math.floor(vim.o.lines * CONFIG.height_pct)
+  local row = math.floor((vim.o.lines - total_height) / 2)
+  local col = math.floor((vim.o.columns - total_width) / 2)
+
+  local preview_width = math.floor(total_width * CONFIG.preview_width_pct)
+  local list_width = total_width - preview_width - 2
+
+  -- Buffers
+  state.buf_list = vim.api.nvim_create_buf(false, true)
+  state.buf_preview = vim.api.nvim_create_buf(false, true)
+
+  -- Set filetype for completion exclusion
+  vim.bo[state.buf_list].filetype = "fzf_list"
+  vim.bo[state.buf_preview].filetype = "fzf_preview"
+
+  -- Windows
+  state.win_list = vim.api.nvim_open_win(state.buf_list, true, {
     relative = "editor",
-    width = width,
-    height = height,
+    width = list_width,
+    height = total_height,
     row = row,
     col = col,
     style = "minimal",
     border = "rounded",
-    title = " Find File ",
-    title_pos = "center",
+    title = " Find Files ",
   })
 
-  vim.wo[win].cursorline = true
-  vim.wo[win].winhl = "NormalFloat:Normal,CursorLine:Visual"
-  vim.bo[buf].filetype = "custom_finder"
-  vim.bo[buf].buftype = "nofile"
+  state.win_preview = vim.api.nvim_open_win(state.buf_preview, false, {
+    relative = "editor",
+    width = preview_width,
+    height = total_height,
+    row = row,
+    col = col + list_width + 2,
+    style = "minimal",
+    border = "rounded",
+    title = " Preview ",
+  })
+
+  -- Styling
+  vim.wo[state.win_list].cursorline = true
+  vim.wo[state.win_list].winhl = "NormalFloat:Normal,CursorLine:Visual"
+  vim.bo[state.buf_list].buftype = "nofile"
+  -- Menu-like behavior
+  vim.wo[state.win_list].cursorcolumn = false
+  vim.wo[state.win_list].list = false
+  vim.wo[state.win_list].wrap = false
   
-  return buf, win
+  vim.wo[state.win_preview].winhl = "NormalFloat:Normal"
+  vim.bo[state.buf_preview].buftype = "nofile"
+
+  -- AUTO-CLOSE Logic: If list window closes, close preview
+  vim.api.nvim_create_autocmd("WinClosed", {
+    pattern = tostring(state.win_list),
+    once = true,
+    callback = function()
+      if state.win_preview and vim.api.nvim_win_is_valid(state.win_preview) then
+        vim.api.nvim_win_close(state.win_preview, true)
+      end
+      -- Cleanup job
+      if state.job_handle and not state.job_handle:is_closing() then
+         state.job_handle:close()
+      end
+    end
+  })
 end
 
-function M.open()
-  local buf, win = create_window()
+-- 3. Filter & Render
+local function filter_and_render(query)
+  if not vim.api.nvim_buf_is_valid(state.buf_list) then return end
+  
   local padding = "  "
+  local results = {}
+  local query_lower = query:lower()
   
-  -- Scan files asynchronously or synchronously? 
-  -- For reasonable project sizes, sync is fine and simpler.
-  -- Adding a "Loading..." message could be good.
-  vim.api.nvim_buf_set_lines(buf, 0, -1, false, { padding .. "Scanning files..." })
-  vim.cmd("redraw")
+  state.filtered_files = {}
+
+  -- FILTER & SCORE
+  local scored_files = {}
   
-  -- Run scan
-  local all_files = get_files(".")
+  for _, file in ipairs(state.files) do
+    if query == "" then
+       table.insert(scored_files, { file = file, score = 1 })
+       if #scored_files > 500 then break end
+    else
+       local score = score_file(file, query_lower)
+       if score > 0 then
+         table.insert(scored_files, { file = file, score = score })
+       end
+    end
+  end
   
-  if #all_files > 20000 then
-    -- Safety cap
-    local capped = {}
-    for i=1, 20000 do capped[i] = all_files[i] end
-    all_files = capped
-    table.insert(all_files, 1, "-- Max limit reached (20k) --")
+  -- SORT by Score DESC
+  if query ~= "" then
+    table.sort(scored_files, function(a, b) return a.score > b.score end)
   end
 
-  local function redraw(query)
-    local results = {}
-    table.insert(results, padding .. query)
-    table.insert(results, padding .. string.rep("─", vim.api.nvim_win_get_width(win) - 6))
+  -- DISPLAY
+  -- Header
+  table.insert(results, padding .. query)
+  table.insert(results, padding .. string.rep("─", vim.api.nvim_win_get_width(state.win_list) - 4))
+  
+  for i, item in ipairs(scored_files) do
+    if i > 500 then break end
+    local clean_file = item.file:gsub("^%./", "")
+    table.insert(results, padding .. clean_file)
+    table.insert(state.filtered_files, clean_file)
+  end
+  
+  vim.api.nvim_buf_set_lines(state.buf_list, 0, -1, false, results)
+  
+  -- Restore cursor
+  if vim.api.nvim_get_mode().mode == 'i' then
+      vim.api.nvim_win_set_cursor(state.win_list, {1, #padding + #query})
+  end
 
-    local match_count = 0
-    local query_lower = query:lower()
-    
-    for _, file in ipairs(all_files) do
-      if match_count > 500 then break end
-      -- Fuzzy-ish search (smart case handled by lower)
-      if query == "" or file:lower():find(query_lower, 1, true) then
-        table.insert(results, padding .. file)
-        match_count = match_count + 1
+  -- AUTO PREVIEW FIRST RESULT
+  if #state.filtered_files > 0 then
+    update_preview(state.filtered_files[1])
+  else
+    update_preview(nil)
+  end
+end
+
+-- 4. Start Scan
+local function start_scan(on_update)
+  state.files = {}
+  
+  local cmd, args
+  if vim.fn.executable("rg") == 1 then
+    cmd = "rg"
+    args = { "--files", "--hidden", "--glob", "!.git/*", "--glob", "!node_modules/*", "--glob", "!__pycache__/*", "--glob", "!target/*", "--glob", "!.venv/*" }
+  else
+    cmd = "find"
+    args = { ".", "-type", "f" } 
+  end
+
+  local stdout = uv.new_pipe(false)
+  local stderr = uv.new_pipe(false)
+
+  state.job_handle = uv.spawn(cmd, {
+    args = args,
+    stdio = { nil, stdout, stderr },
+  }, function()
+    stdout:read_stop()
+    stderr:read_stop()
+    stdout:close()
+    stderr:close()
+    if state.job_handle then state.job_handle:close() end
+    state.job_handle = nil
+  end)
+
+  local buffer = ""
+  stdout:read_start(function(err, data) 
+    assert(not err, err)
+    if data then
+      buffer = buffer .. data
+      local lines = vim.split(buffer, "\n")
+      buffer = lines[#lines]
+      lines[#lines] = nil
+      
+      for _, line in ipairs(lines) do
+        if line ~= "" then table.insert(state.files, line) end
       end
+      
+      if #state.files % CONFIG.batch_size == 0 then
+        vim.schedule(on_update)
+      end
+    else
+      vim.schedule(on_update)
     end
-    
-    vim.api.nvim_buf_set_lines(buf, 0, -1, false, results)
-    
-    if vim.api.nvim_get_mode().mode == 'i' then
-        vim.api.nvim_win_set_cursor(win, {1, #padding + #query})
-    end
-  end
+  end)
+end
 
-  -- Init
-  redraw("")
+-- 5. Main
+function M.open()
+  create_ui()
+  filter_and_render("")
   vim.cmd("startinsert")
 
-  -- Handlers
+  start_scan(function()
+    local line = vim.api.nvim_buf_get_lines(state.buf_list, 0, 1, false)[1]
+    local query = line and line:gsub("^  ", "") or ""
+    filter_and_render(query)
+  end)
+
+  -- Input Change
   vim.api.nvim_create_autocmd("TextChangedI", {
-    buffer = buf,
+    buffer = state.buf_list,
     callback = function()
-      local cursor = vim.api.nvim_win_get_cursor(win)
+      local cursor = vim.api.nvim_win_get_cursor(state.win_list)
       if cursor[1] == 1 then
-          local line = vim.api.nvim_buf_get_lines(buf, 0, 1, false)[1]
-          local query = line:sub(#padding + 1)
-          redraw(query)
+          local line = vim.api.nvim_buf_get_lines(state.buf_list, 0, 1, false)[1]
+          local query = line:sub(3)
+          filter_and_render(query)
       end
     end
   })
 
+  -- Cursor Move (Preview Update)
+  vim.api.nvim_create_autocmd({"CursorMoved", "CursorMovedI"}, {
+    buffer = state.buf_list,
+    callback = function()
+      local cursor = vim.api.nvim_win_get_cursor(state.win_list)
+      local row = cursor[1]
+      
+      if row >= 3 then
+        local idx = row - 2
+        local file = state.filtered_files[idx]
+        update_preview(file)
+      elseif row == 1 and #state.filtered_files > 0 then
+        update_preview(state.filtered_files[1])
+      end
+    end
+  })
+
+  -- Actions
+  local function close()
+    if vim.api.nvim_win_is_valid(state.win_list) then 
+      vim.api.nvim_win_close(state.win_list, true) 
+    end
+    -- WinClosed autocommand handles the rest
+  end
+
+  local function open_file()
+    local cursor = vim.api.nvim_win_get_cursor(state.win_list)
+    local idx
+    if cursor[1] == 1 then idx = 1 else idx = cursor[1] - 2 end
+    
+    local file = state.filtered_files[idx]
+    if file then
+      close()
+      require("config.ui").open_in_normal_win(file)
+    end
+  end
+
+  local opts = { buffer = state.buf_list }
+  vim.keymap.set({"i", "n"}, "<Esc>", close, opts)
+  vim.keymap.set({"i", "n"}, "<CR>", open_file, opts)
+  
+  -- Smart Navigation
   vim.keymap.set("i", "<Down>", function()
     vim.cmd("stopinsert")
-    vim.api.nvim_win_set_cursor(win, {3, 0})
-  end, { buffer = buf })
-
+    if #state.filtered_files > 0 then
+      vim.api.nvim_win_set_cursor(state.win_list, {3, 0})
+    end
+  end, opts)
+  
   vim.keymap.set("n", "<Up>", function()
-    local cursor = vim.api.nvim_win_get_cursor(win)
+    local cursor = vim.api.nvim_win_get_cursor(state.win_list)
     if cursor[1] <= 3 then
-      vim.api.nvim_win_set_cursor(win, {1, 0})
+      vim.api.nvim_win_set_cursor(state.win_list, {1, 0})
       vim.cmd("startinsert")
-      local line = vim.api.nvim_buf_get_lines(buf, 0, 1, false)[1]
-      vim.api.nvim_win_set_cursor(win, {1, #line})
+      local line = vim.api.nvim_buf_get_lines(state.buf_list, 0, 1, false)[1]
+      vim.api.nvim_win_set_cursor(state.win_list, {1, #line})
     else
       vim.cmd("normal! k")
     end
-  end, { buffer = buf })
-
-  local function open_file()
-    local cursor_line = vim.api.nvim_win_get_cursor(win)[1]
-    if cursor_line <= 2 then return end
-
-    local line_content = vim.api.nvim_get_current_line()
-    local clean_path = line_content:sub(#padding + 1)
-    
-    vim.api.nvim_win_close(win, true)
-    
-    if clean_path and clean_path ~= "" and vim.loop.fs_stat(clean_path) then
-      require("config.ui").open_in_normal_win(clean_path)
-    end
-  end
-
-  vim.keymap.set("n", "<Esc>", function() vim.api.nvim_win_close(win, true) end, { buffer = buf })
-  vim.keymap.set("i", "<Esc>", "<cmd>close<CR>", { buffer = buf })
-  vim.keymap.set("n", "<CR>", open_file, { buffer = buf })
-  vim.keymap.set("i", "<CR>", open_file, { buffer = buf })
+  end, opts)
 end
 
 return M
