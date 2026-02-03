@@ -3,13 +3,14 @@
 
 local M = {}
 local uv = vim.loop
+local ui = require("config.ui") -- Load UI module
 
 -- Configuration
 local CONFIG = {
-  width_pct = 0.8,
+  width_pct = 0.7,
   height_pct = 0.8,
   preview_width_pct = 0.6,
-  batch_size = 200, 
+  batch_size = 200,
 }
 
 -- État global
@@ -41,46 +42,46 @@ local function score_file(file, query_lower)
   local file_lower = file:lower()
   -- Extract filename from path
   local filename = file_lower:match("^.+/(.+)$") or file_lower
-  
+
   -- 1. Exact filename match (Best)
   if filename == query_lower then return 100 end
-  
+
   -- 2. Filename starts with query
   if vim.startswith(filename, query_lower) then return 80 end
-  
+
   -- 3. Filename contains query
   if filename:find(query_lower, 1, true) then return 60 end
-  
+
   -- 4. Path contains query
   if file_lower:find(query_lower, 1, true) then return 40 end
-  
+
   -- 5. Fuzzy / Acronym (Optional, simple implementation)
   -- If query is "mc", matches "main_controller"
   -- Skipped for now to keep it fast, unless requested.
-  
+
   return 0
 end
 
 -- 1. Preview Logic
 local function update_preview(filepath)
-  if not filepath or filepath == "" then 
+  if not filepath or filepath == "" then
     if vim.api.nvim_buf_is_valid(state.buf_preview) then
        vim.api.nvim_buf_set_lines(state.buf_preview, 0, -1, false, {})
     end
-    return 
+    return
   end
-  
+
   if state.last_preview_file == filepath then return end
   state.last_preview_file = filepath
 
   if state.preview_timer then state.preview_timer:stop() end
   state.preview_timer = uv.new_timer()
-  
+
   state.preview_timer:start(10, 0, vim.schedule_wrap(function()
     if not vim.api.nvim_buf_is_valid(state.buf_preview) then return end
-    
+
     local stat = uv.fs_stat(filepath)
-    if not stat or stat.type ~= "file" then 
+    if not stat or stat.type ~= "file" then
       vim.api.nvim_buf_set_lines(state.buf_preview, 0, -1, false, { " [Directory or Not Found] " })
       return
     end
@@ -92,19 +93,22 @@ local function update_preview(filepath)
 
     uv.fs_open(filepath, "r", 438, function(err, fd)
       if err then return end
-      uv.fs_read(fd, 4096, 0, function(err_read, data) 
+      uv.fs_read(fd, 4096, 0, function(err_read, data)
         uv.fs_close(fd)
         if err_read then return end
-        
+
         vim.schedule(function()
           if not vim.api.nvim_buf_is_valid(state.buf_preview) then return end
           local lines = vim.split(data or "", "\n")
           if #lines > 100 then lines = { unpack(lines, 1, 100) } end
-          
+
           vim.api.nvim_buf_set_lines(state.buf_preview, 0, -1, false, lines)
-          
-          local ext = filepath:match("^.+%.(.+)$")
-          if ext then vim.bo[state.buf_preview].filetype = ext end
+
+          -- Enhanced Filetype Detection
+          local ft = vim.filetype.match({ filename = filepath })
+          if ft then
+            vim.bo[state.buf_preview].filetype = ft
+          end
         end)
       end)
     end)
@@ -160,9 +164,8 @@ local function create_ui()
   vim.wo[state.win_list].cursorcolumn = false
   vim.wo[state.win_list].list = false
   vim.wo[state.win_list].wrap = false
-  
+
   vim.wo[state.win_preview].winhl = "NormalFloat:Normal"
-  vim.bo[state.buf_preview].buftype = "nofile"
 
   -- Scroll Preview Mappings (Power User Feature)
   local function scroll_preview(direction)
@@ -191,19 +194,21 @@ local function create_ui()
     end
   })
 end
+
 -- 3. Filter & Render
 local function filter_and_render(query)
   if not vim.api.nvim_buf_is_valid(state.buf_list) then return end
-  
+
   local padding = "  "
   local results = {}
+  local highlights = {} -- Store highlight instructions
+
   local query_lower = query:lower()
-  
   state.filtered_files = {}
 
   -- FILTER & SCORE
   local scored_files = {}
-  
+
   for _, file in ipairs(state.files) do
     if query == "" then
        table.insert(scored_files, { file = file, score = 1 })
@@ -215,7 +220,7 @@ local function filter_and_render(query)
        end
     end
   end
-  
+
   -- SORT by Score DESC
   if query ~= "" then
     table.sort(scored_files, function(a, b) return a.score > b.score end)
@@ -225,16 +230,35 @@ local function filter_and_render(query)
   -- Header
   table.insert(results, padding .. query)
   table.insert(results, padding .. string.rep("─", vim.api.nvim_win_get_width(state.win_list) - 4))
-  
+
   for i, item in ipairs(scored_files) do
     if i > 500 then break end
     local clean_file = item.file:gsub("^%./", "")
-    table.insert(results, padding .. clean_file)
+
+    -- Get Icon Data (icon + color group)
+    local icon_data = ui.get_icon_data(clean_file)
+
+    -- Format line: "   config.lua"
+    local line_str = padding .. icon_data.icon .. " " .. clean_file
+    table.insert(results, line_str)
     table.insert(state.filtered_files, clean_file)
+
+    -- Store highlight info: (line_index, col_start, col_end, hl_group)
+    -- Header takes 2 lines, so index is i + 1 (lua 0-based for highlight) + 2
+    local row = i + 1
+    -- Padding (2) + Icon length (byte length)
+    local icon_len = #icon_data.icon
+    table.insert(highlights, { row = row, col_start = 2, col_end = 2 + icon_len, hl = icon_data.hl })
   end
-  
+
   vim.api.nvim_buf_set_lines(state.buf_list, 0, -1, false, results)
-  
+
+  -- APPLY HIGHLIGHTS
+  vim.api.nvim_buf_clear_namespace(state.buf_list, -1, 0, -1)
+  for _, hl in ipairs(highlights) do
+    vim.api.nvim_buf_add_highlight(state.buf_list, -1, hl.hl, hl.row, hl.col_start, hl.col_end)
+  end
+
   -- Restore cursor
   if vim.api.nvim_get_mode().mode == 'i' then
       vim.api.nvim_win_set_cursor(state.win_list, {1, #padding + #query})
@@ -251,14 +275,14 @@ end
 -- 4. Start Scan
 local function start_scan(on_update)
   state.files = {}
-  
+
   local cmd, args
   if vim.fn.executable("rg") == 1 then
     cmd = "rg"
     args = { "--files", "--hidden", "--glob", "!.git/*", "--glob", "!node_modules/*", "--glob", "!__pycache__/*", "--glob", "!target/*", "--glob", "!.venv/*" }
   else
     cmd = "find"
-    args = { ".", "-type", "f" } 
+    args = { ".", "-type", "f" }
   end
 
   local stdout = uv.new_pipe(false)
@@ -277,18 +301,18 @@ local function start_scan(on_update)
   end)
 
   local buffer = ""
-  stdout:read_start(function(err, data) 
+  stdout:read_start(function(err, data)
     assert(not err, err)
     if data then
       buffer = buffer .. data
       local lines = vim.split(buffer, "\n")
       buffer = lines[#lines]
       lines[#lines] = nil
-      
+
       for _, line in ipairs(lines) do
         if line ~= "" then table.insert(state.files, line) end
       end
-      
+
       if #state.files % CONFIG.batch_size == 0 then
         vim.schedule(on_update)
       end
@@ -329,7 +353,7 @@ function M.open()
     callback = function()
       local cursor = vim.api.nvim_win_get_cursor(state.win_list)
       local row = cursor[1]
-      
+
       if row >= 3 then
         local idx = row - 2
         local file = state.filtered_files[idx]
@@ -342,8 +366,8 @@ function M.open()
 
   -- Actions
   local function close()
-    if vim.api.nvim_win_is_valid(state.win_list) then 
-      vim.api.nvim_win_close(state.win_list, true) 
+    if vim.api.nvim_win_is_valid(state.win_list) then
+      vim.api.nvim_win_close(state.win_list, true)
     end
     -- WinClosed autocommand handles the rest
   end
@@ -352,7 +376,7 @@ function M.open()
     local cursor = vim.api.nvim_win_get_cursor(state.win_list)
     local idx
     if cursor[1] == 1 then idx = 1 else idx = cursor[1] - 2 end
-    
+
     local file = state.filtered_files[idx]
     if file then
       close()
@@ -363,15 +387,13 @@ function M.open()
   local opts = { buffer = state.buf_list }
   vim.keymap.set({"i", "n"}, "<Esc>", close, opts)
   vim.keymap.set({"i", "n"}, "<CR>", open_file, opts)
-  
-  -- Smart Navigation
+
+  -- Navigation
   vim.keymap.set("i", "<Down>", function()
     vim.cmd("stopinsert")
-    if #state.filtered_files > 0 then
-      vim.api.nvim_win_set_cursor(state.win_list, {3, 0})
-    end
+    vim.api.nvim_win_set_cursor(state.win_list, {3, 0})
   end, opts)
-  
+
   vim.keymap.set("n", "<Up>", function()
     local cursor = vim.api.nvim_win_get_cursor(state.win_list)
     if cursor[1] <= 3 then
@@ -383,6 +405,27 @@ function M.open()
       vim.cmd("normal! k")
     end
   end, opts)
+
+  -- AUTO-REDIRECT INPUT: Type anywhere to search
+  local function redirect_to_input(key)
+    -- 1. Move cursor to input line (end)
+    local line = vim.api.nvim_buf_get_lines(state.buf_list, 0, 1, false)[1]
+    vim.api.nvim_win_set_cursor(state.win_list, {1, #line})
+    -- 2. Enter Insert Mode
+    vim.cmd("startinsert")
+    -- 3. Feed the key
+    if key then
+      local k = vim.api.nvim_replace_termcodes(key, true, false, true)
+      vim.api.nvim_feedkeys(k, "n", true)
+    end
+  end
+
+  -- Map all printable chars + Backspace
+  for i = 32, 126 do -- ASCII space to ~
+    local char = string.char(i)
+    vim.keymap.set("n", char, function() redirect_to_input(char) end, opts)
+  end
+  vim.keymap.set("n", "<BS>", function() redirect_to_input("<BS>") end, opts)
 end
 
 return M

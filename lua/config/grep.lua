@@ -3,12 +3,13 @@
 
 local M = {}
 local uv = vim.loop
+local ui = require("config.ui") -- Load UI for icons
 
 -- Configuration
 local CONFIG = {
-  width_pct = 0.8,
+  width_pct = 0.7,
   height_pct = 0.8,
-  preview_width_pct = 0.6,
+  preview_width_pct = 0.7,
   batch_size = 50,
 }
 
@@ -77,11 +78,16 @@ local function update_preview(filename, lnum)
           if not vim.api.nvim_buf_is_valid(state.buf_preview) then return end
           local lines = vim.split(data or "", "\n")
           vim.api.nvim_buf_set_lines(state.buf_preview, 0, -1, false, lines)
-          local ext = filename:match("^.+%.(.+)$")
-          if ext then vim.bo[state.buf_preview].filetype = ext end
+          
+          local ft = vim.filetype.match({ filename = filename })
+          if ft then vim.bo[state.buf_preview].filetype = ft end
+          
           pcall(vim.api.nvim_win_set_cursor, state.win_preview, {lnum, 0})
           vim.api.nvim_win_call(state.win_preview, function() vim.cmd("normal! zz") end)
-          vim.api.nvim_buf_add_highlight(state.buf_preview, -1, "Search", lnum - 1, 0, -1)
+          
+          local ns = vim.api.nvim_create_namespace("grep_preview")
+          vim.api.nvim_buf_clear_namespace(state.buf_preview, ns, 0, -1)
+          vim.api.nvim_buf_add_highlight(state.buf_preview, ns, "Search", lnum - 1, 0, -1)
         end)
       end)
     end)
@@ -90,9 +96,8 @@ end
 
 -- 2. Render List (Grouped by File)
 local function render_list(query)
-  if not vim.api.nvim_buf_is_valid(state.buf_list) then return end
+  if not vim.api.nvim_buf_is_valid(state.buf_list) or not vim.api.nvim_win_is_valid(state.win_list) then return end
   
-  -- Sort results: Filename > Line Number
   table.sort(state.results, function(a, b) 
     if a.filename == b.filename then
       return (tonumber(a.lnum) or 0) < (tonumber(b.lnum) or 0)
@@ -102,9 +107,9 @@ local function render_list(query)
   end)
   
   local display_lines = {}
+  local highlights = {} 
   state.line_map = {}
   
-  -- 1 & 2: Search Header
   table.insert(display_lines, "  " .. query)
   table.insert(display_lines, "  " .. string.rep("─", vim.api.nvim_win_get_width(state.win_list) - 4))
   
@@ -114,41 +119,44 @@ local function render_list(query)
     local current_file = nil
     for i, res in ipairs(state.results) do
       if #display_lines > 500 then break end
-      
-      -- New file group
       if res.filename ~= current_file then
         current_file = res.filename
         local clean_name = res.filename:gsub("^%./", "")
-        table.insert(display_lines, "  " .. clean_name)
+        local icon_data = ui.get_icon_data(clean_name)
+        table.insert(display_lines, " " .. icon_data.icon .. " " .. clean_name)
+        local row = #display_lines - 1
+        local col_end = 1 + #icon_data.icon
+        table.insert(highlights, { row = row, col_start = 1, col_end = col_end, hl = icon_data.hl })
       end
       
-      -- Match line (Filename stripped)
       local line_str = string.format("   %s: %s", res.lnum, res.text)
       table.insert(display_lines, line_str)
-      -- Map buffer line to state.results index
       state.line_map[#display_lines] = i
     end
   end
   
   vim.api.nvim_buf_set_lines(state.buf_list, 0, -1, false, display_lines)
-  
-  -- Highlights for the grouped view
   vim.api.nvim_buf_clear_namespace(state.buf_list, -1, 0, -1)
+  
   for i, line in ipairs(display_lines) do
-    if line:match("^ ") then
-      vim.api.nvim_buf_add_highlight(state.buf_list, -1, "Directory", i - 1, 0, -1)
-    elseif line:match("^   %d+:") then
+    if line:match("^   %d+:") then
       local lnum_end = line:find(":")
       vim.api.nvim_buf_add_highlight(state.buf_list, -1, "LineNr", i - 1, 3, lnum_end)
+    elseif i > 2 and not line:match("^   ") then
+       local icon_end = line:find(" ", 2)
+       if icon_end then
+          vim.api.nvim_buf_add_highlight(state.buf_list, -1, "Directory", i - 1, icon_end, -1)
+       end
     end
   end
+  for _, hl in ipairs(highlights) do
+    vim.api.nvim_buf_add_highlight(state.buf_list, -1, hl.hl, hl.row, hl.col_start, hl.col_end)
+  end
 
-  -- Restore Cursor
   if vim.api.nvim_get_mode().mode == 'i' then
       vim.api.nvim_win_set_cursor(state.win_list, {1, 2 + #query})
   end
   
-  -- Auto Preview first result
   if #state.results > 0 then
       update_preview(state.results[1].filename, state.results[1].lnum)
   else
@@ -174,13 +182,21 @@ local function start_grep(query)
   table.insert(args, ".")
   
   local stdout = uv.new_pipe(false)
+  local stderr = uv.new_pipe(false) -- Capture stderr for safety
+  
   state.job_handle = uv.spawn(cmd, {
     args = args,
-    stdio = { nil, stdout, nil },
+    stdio = { nil, stdout, stderr },
   }, function() 
     stdout:read_stop()
+    stderr:read_stop() -- Stop stderr reading
     stdout:close()
+    stderr:close() -- Close stderr pipe
+    if state.job_handle then state.job_handle:close() end
   end)
+  
+  -- Dummy read for stderr to prevent buffer blocking
+  stderr:read_start(function(err, data) end) 
   
   local buffer = ""
   stdout:read_start(function(err, data)
@@ -235,7 +251,6 @@ local function create_ui()
   vim.bo[state.buf_preview].buftype = "nofile"
   vim.wo[state.win_preview].number = true
 
-  -- Scroll Preview Mappings
   local function scroll_preview(direction)
     if vim.api.nvim_win_is_valid(state.win_preview) then
       vim.api.nvim_win_call(state.win_preview, function()
@@ -284,9 +299,10 @@ function M.open()
       local res_idx = state.line_map[row]
       if res_idx then
         local res = state.results[res_idx]
-        update_preview(res.filename, res.lnum)
+        if res then update_preview(res.filename, res.lnum) end
       elseif row == 1 and #state.results > 0 then
-        update_preview(state.results[1].filename, state.results[1].lnum)
+        local res = state.results[1]
+        if res then update_preview(res.filename, res.lnum) end
       end
     end
   })
@@ -307,29 +323,65 @@ function M.open()
   vim.keymap.set({"i", "n"}, "<Esc>", close, opts)
   vim.keymap.set({"i", "n"}, "<CR>", open_result, opts)
   
-  vim.keymap.set("i", "<Down>", function()
+  local function navigate(dir)
     vim.cmd("stopinsert")
-    if #display_lines >= 3 then vim.api.nvim_win_set_cursor(state.win_list, {3, 0}) end
-    -- Skip to first match if on a directory line
-    local row = vim.api.nvim_win_get_cursor(state.win_list)[1]
-    if not state.line_map[row] and row < vim.api.nvim_buf_line_count(state.buf_list) then
-       vim.cmd("normal! j")
+    -- Safety: If list is empty or map not ready, do nothing
+    if vim.tbl_isempty(state.line_map) then return end
+    
+    local current_row = vim.api.nvim_win_get_cursor(state.win_list)[1]
+    local line_count = vim.api.nvim_buf_line_count(state.buf_list)
+    
+    local target_row
+    if current_row == 1 and dir > 0 then
+      target_row = 3 
+    else
+      target_row = current_row + dir
     end
-  end, opts)
-  
-  vim.keymap.set("n", "<Up>", function()
+    
+    if target_row < 3 then target_row = 3 end
+    if target_row > line_count then target_row = line_count end
+    
+    local steps = 0
+    while not state.line_map[target_row] and target_row < line_count and target_row >= 3 and steps < 100 do
+      target_row = target_row + dir
+      steps = steps + 1
+    end
+    
+    if state.line_map[target_row] then
+       vim.api.nvim_win_set_cursor(state.win_list, {target_row, 0})
+    end
+  end
+
+  vim.keymap.set("i", "<Down>", function() navigate(1) end, opts)
+  vim.keymap.set("n", "<Down>", function() navigate(1) end, opts)
+  vim.keymap.set("n", "<Up>", function() navigate(-1) end, opts)
+  vim.keymap.set("i", "<Up>", function() 
     local row = vim.api.nvim_win_get_cursor(state.win_list)[1]
-    if row <= 3 then
+    if row <= 3 then 
       vim.api.nvim_win_set_cursor(state.win_list, {1, 0})
       vim.cmd("startinsert")
       local line = vim.api.nvim_buf_get_lines(state.buf_list, 0, 1, false)[1]
       vim.api.nvim_win_set_cursor(state.win_list, {1, #line})
     else
-      vim.cmd("normal! k")
-      local new_row = vim.api.nvim_win_get_cursor(state.win_list)[1]
-      if not state.line_map[new_row] and new_row > 2 then vim.cmd("normal! k") end
+      navigate(-1)
     end
   end, opts)
+
+  local function redirect_to_input(key)
+    local line = vim.api.nvim_buf_get_lines(state.buf_list, 0, 1, false)[1]
+    vim.api.nvim_win_set_cursor(state.win_list, {1, #line})
+    vim.cmd("startinsert")
+    if key then
+      local k = vim.api.nvim_replace_termcodes(key, true, false, true)
+      vim.api.nvim_feedkeys(k, "n", true)
+    end
+  end
+
+  for i = 32, 126 do 
+    local char = string.char(i)
+    vim.keymap.set("n", char, function() redirect_to_input(char) end, opts)
+  end
+  vim.keymap.set("n", "<BS>", function() redirect_to_input("<BS>") end, opts)
 end
 
 return M

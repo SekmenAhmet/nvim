@@ -20,9 +20,13 @@ return {
 
       -- Si on arrive ici, configs existe (miracle ?)
       configs.setup({
-        ensure_installed = { "lua", "vim", "markdown" },
+        -- On laisse l'utilisateur ou le système gérer l'installation des parseurs
+        -- car tree-sitter-cli n'est pas forcément présent.
+        ensure_installed = {}, 
+        auto_install = false, 
         sync_install = false,
         highlight = { enable = true },
+        indent = { enable = true },
       })
     end
   },

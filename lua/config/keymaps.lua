@@ -65,6 +65,9 @@ vim.keymap.set("n", "<leader>ff", function() require("config.finder").open() end
 -- Live Grep (Leader fg)
 vim.keymap.set("n", "<leader>fg", function() require("config.grep").open() end, { desc = "Live Grep (Native)" })
 
+-- Native Search (Replace /)
+vim.keymap.set("n", "/", function() require("config.search").open() end, { desc = "Search in file (Native)" })
+
 -- Terminal (Ctrl+t)
 local function toggle_term() require("config.terminal").toggle() end
 vim.keymap.set({"n", "i", "t"}, "<C-t>", toggle_term, { desc = "Toggle terminal" })

@@ -24,6 +24,7 @@ if vim.loader then vim.loader.enable() end
 
 -- Entry point
 require("config.options")
+require("config.colors").setup() -- Load Theme immediately
 require("config.lazy")
 require("config.keymaps") -- Keymaps now handle lazy loading triggers
 require("config.moves")

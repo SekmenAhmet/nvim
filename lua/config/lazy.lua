@@ -6,4 +6,9 @@ require("lazy").setup({
   spec = {
     { import = "plugins" },
   },
+  -- Disable Luarocks handling (we use system packages or don't need rocks)
+  rocks = {
+    enabled = false,
+    hererocks = false, 
+  },
 })
