@@ -59,11 +59,41 @@ local function highlight_and_search(query, direction)
     if direction == 0 then
       -- Typing: Reset to start and search forward
       vim.fn.setpos(".", state.original_cursor)
-      local found = vim.fn.search(query, "cW") -- c = accept current, W = no wrap for live preview
+      
+      -- Smart Loop: Skip Comments
+      local found = 0
+      local attempt = 0
+      while attempt < 50 do -- Safety limit
+        found = vim.fn.search(query, "cW")
+        if found == 0 then break end
+        
+        -- Check if match is inside a comment
+        local syntax_group = vim.fn.synIDattr(vim.fn.synID(vim.fn.line("."), vim.fn.col("."), 1), "name")
+        if not syntax_group:lower():match("comment") then
+          break -- Valid match found
+        end
+        -- If comment, move cursor slightly and continue searching (remove 'c' flag to move forward)
+        vim.fn.search(query, "W") 
+        attempt = attempt + 1
+      end
+      
       if found > 0 then vim.cmd("normal! zz") end
+      
     elseif direction == 1 then
-      -- Enter: Search Next (with wrap)
-      local found = vim.fn.search(query, "w") -- w = wrap around
+      -- Enter: Search Next (with wrap and skip comments)
+      local found = 0
+      local attempt = 0
+      while attempt < 50 do
+        found = vim.fn.search(query, "w")
+        if found == 0 then break end
+        
+        local syntax_group = vim.fn.synIDattr(vim.fn.synID(vim.fn.line("."), vim.fn.col("."), 1), "name")
+        if not syntax_group:lower():match("comment") then
+          break
+        end
+        attempt = attempt + 1
+      end
+      
       if found > 0 then vim.cmd("normal! zz") end
     end
   end)

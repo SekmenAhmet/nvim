@@ -9,7 +9,7 @@ local ui = require("config.ui") -- Load UI for icons
 local CONFIG = {
   width_pct = 0.7,
   height_pct = 0.8,
-  preview_width_pct = 0.7,
+  preview_width_pct = 0.6,
   batch_size = 50,
 }
 
@@ -208,7 +208,22 @@ local function start_grep(query)
       for _, line in ipairs(lines) do
         local parts = vim.split(line, ":")
         if #parts >= 4 then
-          table.insert(state.results, { filename = parts[1], lnum = parts[2], text = table.concat(parts, ":", 4) })
+          local filename = parts[1]
+          local lnum = parts[2]
+          local text = table.concat(parts, ":", 4)
+          
+          -- HEURISTIC: Skip obvious comments to reduce noise
+          -- Matches: //, #, --, %, " (vim), /*, * (javadoc)
+          local is_comment = text:match("^%s*//") or 
+                             text:match("^%s*#") or 
+                             text:match("^%s*%-%-") or
+                             text:match("^%s*%%") or
+                             text:match("^%s*/%*") or
+                             text:match("^%s*%*")
+                             
+          if not is_comment then
+             table.insert(state.results, { filename = filename, lnum = lnum, text = text })
+          end
         end
       end
       if #state.results % CONFIG.batch_size == 0 then
