@@ -1,6 +1,14 @@
--- Navigation entre fenêtres : Ctrl+H (gauche), Ctrl+L (droite)
+-- Navigation entre fenêtres : Ctrl+HJKL (Toutes directions)
 vim.keymap.set("n", "<C-h>", "<C-w>h", { silent = true, desc = "Go to left window" })
+vim.keymap.set("n", "<C-j>", "<C-w>j", { silent = true, desc = "Go to window below" })
+vim.keymap.set("n", "<C-k>", "<C-w>k", { silent = true, desc = "Go to window above" })
 vim.keymap.set("n", "<C-l>", "<C-w>l", { silent = true, desc = "Go to right window" })
+
+-- Terminal mode navigation
+vim.keymap.set("t", "<C-h>", [[<C-\><C-n><C-w>h]], { silent = true, desc = "Go to left window" })
+vim.keymap.set("t", "<C-j>", [[<C-\><C-n><C-w>j]], { silent = true, desc = "Go to window below" })
+vim.keymap.set("t", "<C-k>", [[<C-\><C-n><C-w>k]], { silent = true, desc = "Go to window above" })
+vim.keymap.set("t", "<C-l>", [[<C-\><C-n><C-w>l]], { silent = true, desc = "Go to right window" })
 
 -- Resize du tree avec Ctrl+Alt+flèches (Inversé)
 vim.keymap.set("n", "<C-M-Left>", "<cmd>vertical resize +2<CR>", { silent = true, desc = "Increase window width" })
@@ -15,23 +23,68 @@ vim.keymap.set("v", "<C-s>", "<Esc>:w<CR>", { silent = true, desc = "Save file" 
 vim.keymap.set("n", "<Tab>", ":bnext<CR>", { silent = true, desc = "Next Buffer" })
 vim.keymap.set("n", "<S-Tab>", ":bprev<CR>", { silent = true, desc = "Previous Buffer" })
 
--- Helper to close current buffer
-local function close_buffer()
-  local current = vim.api.nvim_get_current_buf()
-  local buffers = vim.fn.getbufinfo({buflisted=1})
+-- Smart Buffer Delete avec gestion des cas edge
+local function smart_buffer_delete()
+  local buf = vim.api.nvim_get_current_buf()
+  local buf_name = vim.api.nvim_buf_get_name(buf)
+  local buf_modified = vim.bo[buf].modified
+  local buf_type = vim.bo[buf].buftype
+  
+  -- Ne pas fermer certains buffers spéciaux
+  if buf_type == "terminal" then
+    -- Pour le terminal, utiliser la fermeture spéciale
+    vim.cmd("bdelete! " .. buf)
+    return
+  end
+  
+  -- Si buffer modifié, demander confirmation
+  if buf_modified then
+    local choice = vim.fn.confirm(
+      "Buffer modifié. Sauvegarder?", 
+      "&Oui\n&Non (perdre)\n&Annuler", 
+      3
+    )
+    if choice == 1 then
+      -- Oui : sauvegarder puis fermer
+      vim.cmd("write")
+    elseif choice == 3 then
+      -- Annuler : ne rien faire
+      return
+    end
+    -- Non : continuer sans sauvegarder
+  end
+  
+  -- Récupérer la liste des buffers listés
+  local buffers = vim.fn.getbufinfo({buflisted = 1})
+  local current_index = nil
+  
+  -- Trouver l'index du buffer actuel
+  for i, b in ipairs(buffers) do
+    if b.bufnr == buf then
+      current_index = i
+      break
+    end
+  end
   
   if #buffers > 1 then
-    -- Try to switch to previous buffer first
-    vim.cmd("bprevious")
+    -- Essayer d'aller au buffer précédent dans l'historique
+    local ok = pcall(vim.cmd, "bprevious")
+    if not ok or vim.api.nvim_get_current_buf() == buf then
+      -- Si échec, aller au suivant
+      pcall(vim.cmd, "bnext")
+    end
   else
-    -- If it's the last buffer, create a new one first
+    -- Dernier buffer : créer un nouveau
     vim.cmd("enew")
   end
   
-  -- Delete the original buffer if it's valid
-  if vim.api.nvim_buf_is_valid(current) then
-    vim.cmd("bdelete " .. current)
+  -- Supprimer le buffer original
+  if vim.api.nvim_buf_is_valid(buf) then
+    vim.cmd("bdelete " .. buf)
   end
+  
+  -- Notification subtile
+  vim.notify("Buffer fermé", vim.log.levels.INFO, { timeout = 500 })
 end
 
 -- Helper to close all buffers
@@ -49,7 +102,7 @@ local function close_all_buffers()
 end
 
 -- Fermer le buffer actuel sans fermer la fenêtre
-vim.keymap.set("n", "<leader>x", close_buffer, { silent = true, desc = "Close current buffer" })
+vim.keymap.set("n", "<leader>x", smart_buffer_delete, { silent = true, desc = "Close current buffer (smart)" })
 vim.keymap.set("n", "<leader>X", close_all_buffers, { silent = true, desc = "Close all buffers" })
 
 -- Supprimer le mot précédent en mode insert (Ctrl+Backspace)

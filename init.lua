@@ -44,6 +44,12 @@ vim.schedule(function()
   require("config.ui")
   require("config.autocmds")
   
+  -- Load new modules (illuminate, marks, multicursor have autocommands)
+  require("config.illuminate")
+  require("config.marks")
+  require("config.multicursor")
+  require("config.quickfix")
+  
   -- Startup time report
   local end_time = vim.uv.hrtime()
   local startup_ms = (end_time - start_time) / 1e6
