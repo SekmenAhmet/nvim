@@ -1,5 +1,5 @@
 -- Measure startup time
-local start_time = vim.loop.hrtime()
+local start_time = vim.uv.hrtime()
 
 -- 1. Disable Useless Providers (Optimization)
 vim.g.loaded_python3_provider = 0
@@ -45,7 +45,7 @@ vim.schedule(function()
   require("config.autocmds")
   
   -- Startup time report
-  local end_time = vim.loop.hrtime()
+  local end_time = vim.uv.hrtime()
   local startup_ms = (end_time - start_time) / 1e6
   vim.g.startup_time = startup_ms -- Global variable for statusline
   

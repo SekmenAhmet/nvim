@@ -3,6 +3,7 @@
 
 local M = {}
 local api = vim.api
+local window = require("config.window")
 
 -- State
 local state = {
@@ -60,30 +61,21 @@ end
 function M.open()
   state.original_guicursor = vim.o.guicursor
   
-  -- Create Floating Window (Top Center)
-  local width = math.floor(vim.o.columns * 0.25)
-  local col = math.floor((vim.o.columns - width) / 2)
-  
-  state.buf = api.nvim_create_buf(false, true)
-  api.nvim_buf_set_lines(state.buf, 0, -1, false, {"  : "}) -- Padding with :
-  
-  state.win = api.nvim_open_win(state.buf, true, {
-    relative = "editor",
-    width = width,
+  -- Create Floating Window using window library
+  local win = window.create_centered({
+    width_pct = 0.25,
     height = 1,
-    row = 2,
-    col = col,
-    style = "minimal",
-    border = "rounded",
-    title = " Command ",
-    title_pos = "center",
+    title = "Command",
+    row_offset = 2
   })
   
-  vim.wo[state.win].winhl = "NormalFloat:NormalFloat,FloatBorder:FloatBorder,CursorLine:Visual"
-  vim.bo[state.buf].buftype = "nofile"
+  state.buf = win.buf
+  state.win = win.win
+  
+  api.nvim_buf_set_lines(state.buf, 0, -1, false, {"  : "}) -- Padding with :
   
   vim.cmd("startinsert")
-  vim.api.nvim_win_set_cursor(state.win, {1, 4}) -- Start after "  : "
+  api.nvim_win_set_cursor(state.win, {1, 4}) -- Start after "  : "
   
   -- Enforce Padding and : on Type
   api.nvim_create_autocmd("TextChangedI", {

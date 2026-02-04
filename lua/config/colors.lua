@@ -108,6 +108,16 @@ function M.setup()
   set("TreeFile", { fg = c.fg })
   set("TreeRoot", { fg = c.purple, bold = true, underline = true })
   
+  -- Git status in Tree
+  set("GitStatusModified", { fg = c.red, bold = true })
+  set("GitStatusAdded", { fg = c.green, bold = true })
+  set("GitStatusUntracked", { fg = c.yellow })
+  set("GitStatusDeleted", { fg = c.comment })
+  
+  -- LSP diagnostics in Tree
+  set("TreeFileError", { fg = c.red, bold = true })    -- Fichier avec erreurs
+  set("TreeFileWarn", { fg = c.yellow, bold = true })  -- Fichier avec warnings
+  
   -- Statusline
   set("StatusLineNormal", { fg = c.blue, bg = c.bg_highlight, bold = true })
   set("StatusLineInsert", { fg = c.green, bg = c.bg_highlight, bold = true })
@@ -119,6 +129,39 @@ function M.setup()
   set("TabLine", { fg = c.comment, bg = c.bg_dark })
   set("TabLineSel", { fg = c.blue, bg = c.bg, bold = true })
   set("TabLineFill", { bg = c.bg_dark })
+  
+  -- Tabline with diagnostics
+  set("TabLineError", { fg = c.red, bg = c.bg_dark, bold = true })
+  set("TabLineWarn", { fg = c.yellow, bg = c.bg_dark, bold = true })
+  set("TabLineSelError", { fg = c.red, bg = c.bg, bold = true })
+  set("TabLineSelWarn", { fg = c.yellow, bg = c.bg, bold = true })
+
+  -- LSP Diagnostics (Native)
+  set("DiagnosticError", { fg = c.red })
+  set("DiagnosticWarn", { fg = c.yellow })
+  set("DiagnosticInfo", { fg = c.blue })
+  set("DiagnosticHint", { fg = c.cyan })
+  
+  -- LSP Signs (Gutter)
+  set("DiagnosticSignError", { fg = c.red, bold = true })
+  set("DiagnosticSignWarn", { fg = c.yellow, bold = true })
+  set("DiagnosticSignInfo", { fg = c.blue })
+  set("DiagnosticSignHint", { fg = c.cyan })
+  
+  -- LSP Underline
+  set("DiagnosticUnderlineError", { underline = true, sp = c.red })
+  set("DiagnosticUnderlineWarn", { underline = true, sp = c.yellow })
+  set("DiagnosticUnderlineInfo", { underline = true, sp = c.blue })
+  set("DiagnosticUnderlineHint", { underline = true, sp = c.cyan })
+  
+  -- LSP Floating Window
+  set("DiagnosticFloatingError", { fg = c.red, bg = c.bg_dark })
+  set("DiagnosticFloatingWarn", { fg = c.yellow, bg = c.bg_dark })
+  set("DiagnosticFloatingInfo", { fg = c.blue, bg = c.bg_dark })
+  set("DiagnosticFloatingHint", { fg = c.cyan, bg = c.bg_dark })
+  
+  -- Line highlight for errors (optional)
+  set("DiagnosticLineError", { bg = "#3b2020" })  -- Rouge très subtil
 
   -- Pmenu
   set("Pmenu", { bg = c.bg_dark, fg = c.fg })

@@ -2,7 +2,7 @@
 vim.g.mapleader = " "
 
 -- Detect OS and set Shell
-if vim.loop.os_uname().sysname == "Windows_NT" then
+if vim.uv.os_uname().sysname == "Windows_NT" then
   vim.opt.shell = "powershell"
 else
   -- Linux/Mac

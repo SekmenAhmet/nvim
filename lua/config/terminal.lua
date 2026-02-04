@@ -15,7 +15,7 @@ function M.toggle()
   local width = math.floor(vim.o.columns * 0.85)
   local height = math.floor(vim.o.lines * 0.8)
   local row = math.floor((vim.o.lines - height) / 2)
-  local col = math.floor((vim.o.columns - width) / 2)
+  local col = math.floor((vim.o.columns - width) / 2) + 1  -- +1 padding x
 
   -- Create buffer if needed
   if terminal_buf == nil or not vim.api.nvim_buf_is_valid(terminal_buf) then
@@ -39,7 +39,7 @@ function M.toggle()
   if vim.bo[terminal_buf].channel == 0 then
     -- Determine shell based on OS
     local shell = vim.o.shell
-    local is_windows = vim.loop.os_uname().version:find("Windows") or vim.fn.has("win32") == 1
+    local is_windows = vim.uv.os_uname().version:find("Windows") or vim.fn.has("win32") == 1
 
     if is_windows then
       if vim.fn.executable("pwsh") == 1 then
@@ -72,7 +72,11 @@ function M.toggle()
 
   -- Keymaps for the terminal buffer
   local opts = { buffer = terminal_buf, silent = true }
-  vim.keymap.set("t", "<Esc>", [[<C-\\><C-n>]], opts) -- Exit insert mode
+  -- Esc ferme directement depuis le mode terminal (plus pratique)
+  vim.keymap.set("t", "<Esc>", function()
+    vim.api.nvim_win_close(terminal_win, true)
+    terminal_win = nil
+  end, opts)
   vim.keymap.set("t", "<C-t>", M.toggle, opts) 
   vim.keymap.set("n", "<C-t>", M.toggle, opts)
   vim.keymap.set("n", "q", M.toggle, opts)

@@ -1,142 +1,181 @@
 -- Native Floating Search (Replace /)
--- Architecture: Floating Window + Realtime 'matchadd' & 'search'
+-- Architecture: Floating Window + Realtime Search with Counter
 
 local M = {}
 local api = vim.api
+local window = require("config.window")
 
 -- State
 local state = {
   buf = nil,
   win = nil,
   target_win = nil,
+  target_buf = nil,
   ns_id = api.nvim_create_namespace("live_search"),
-  original_cursor = nil,
+  count_ns = api.nvim_create_namespace("search_count"),
+  cursor_ns = api.nvim_create_namespace("search_cursor"),
   original_view = nil,
-  match_id = nil,
+  match_ids = {},
   query = "",
+  autocmds = {},
+  count_extmark_id = nil,  -- Pour tracker l'extmark du compteur
 }
 
+-- Nettoyer tous les highlights
 local function clear_highlights()
+  -- Supprimer les matchadd
   if state.target_win and api.nvim_win_is_valid(state.target_win) then
     api.nvim_win_call(state.target_win, function()
-      if state.match_id then
-        pcall(vim.fn.matchdelete, state.match_id)
-        state.match_id = nil
-      end
+      vim.fn.clearmatches()
     end)
   end
+  state.match_ids = {}
+  
+  -- Nettoyer le counter dans la fenêtre de search
+  if state.buf and api.nvim_buf_is_valid(state.buf) then
+    api.nvim_buf_clear_namespace(state.buf, state.count_ns, 0, -1)
+  end
+  state.count_extmark_id = nil
 end
 
-local function highlight_and_search(query, direction)
-  if not api.nvim_win_is_valid(state.target_win) then return end
+-- Mettre à jour le compteur d'occurrences
+local function update_counter()
+  if not state.buf or not api.nvim_buf_is_valid(state.buf) then return end
+  if not state.target_win or not api.nvim_win_is_valid(state.target_win) then return end
+  
+  -- Supprimer l'ancien extmark du compteur
+  if state.count_extmark_id then
+    pcall(api.nvim_buf_del_extmark, state.buf, state.count_ns, state.count_extmark_id)
+    state.count_extmark_id = nil
+  end
+  
+  if state.query == "" then
+    return
+  end
   
   api.nvim_win_call(state.target_win, function()
-    -- 1. Clear previous
-    if state.match_id then pcall(vim.fn.matchdelete, state.match_id) state.match_id = nil end
+    local count = vim.fn.searchcount({
+      pattern = state.query,
+      maxcount = 999,
+      timeout = 100,
+    })
     
-    if query == "" then 
-      -- Restore view if empty
-      vim.fn.winrestview(state.original_view)
-      return 
-    end
-    
-    -- 2. Highlight all matches (Gray/Dim) using search pattern
-    -- Note: We use 'Search' hl group.
-    -- We use pcall because regex might be invalid while typing
-    local ok, id = pcall(vim.fn.matchadd, "Search", query)
-    if ok then state.match_id = id end
-
-    -- 3. Move Cursor
-    -- 'c' = accept match at cursor position
-    -- 's' = do not move cursor (we handled this manually? no, let's let vim search)
-    -- 'w' = wrap around
-    local flags = "c"
-    if direction == 1 then flags = "nw" end -- Just checking existence first? No, we want to jump.
-    
-    -- We always start search from ORIGINAL position for the first type-ahead
-    -- BUT if we are pressing ENTER (Next), we search forward.
-    
-    if direction == 0 then
-      -- Typing: Reset to start and search forward
-      vim.fn.setpos(".", state.original_cursor)
-      
-      -- Smart Loop: Skip Comments
-      local found = 0
-      local attempt = 0
-      while attempt < 50 do -- Safety limit
-        found = vim.fn.search(query, "cW")
-        if found == 0 then break end
-        
-        -- Check if match is inside a comment
-        local syntax_group = vim.fn.synIDattr(vim.fn.synID(vim.fn.line("."), vim.fn.col("."), 1), "name")
-        if not syntax_group:lower():match("comment") then
-          break -- Valid match found
-        end
-        -- If comment, move cursor slightly and continue searching (remove 'c' flag to move forward)
-        vim.fn.search(query, "W") 
-        attempt = attempt + 1
+    if count.total > 0 then
+      local count_str = string.format("[%d/%d]", count.current, count.total)
+      -- Calculer la position : largeur - texte - 2 colonnes de marge
+      local win_width = api.nvim_win_get_width(state.win)
+      local col_pos = math.max(0, win_width - #count_str - 2)
+      -- Utiliser overlay pour position précise
+      local ok, id = pcall(api.nvim_buf_set_extmark, state.buf, state.count_ns, 0, 0, {
+        virt_text = {{count_str, "Comment"}},
+        virt_text_pos = "overlay",
+        virt_text_win_col = col_pos,
+        hl_mode = "combine",
+      })
+      if ok then
+        state.count_extmark_id = id
       end
-      
-      if found > 0 then vim.cmd("normal! zz") end
-      
-    elseif direction == 1 then
-      -- Enter: Search Next (with wrap and skip comments)
-      local found = 0
-      local attempt = 0
-      while attempt < 50 do
-        found = vim.fn.search(query, "w")
-        if found == 0 then break end
-        
-        local syntax_group = vim.fn.synIDattr(vim.fn.synID(vim.fn.line("."), vim.fn.col("."), 1), "name")
-        if not syntax_group:lower():match("comment") then
-          break
-        end
-        attempt = attempt + 1
-      end
-      
-      if found > 0 then vim.cmd("normal! zz") end
     end
   end)
 end
 
+-- Déplacer le curseur vers une occurrence
+local function move_to_match(direction)
+  if not state.target_win or not api.nvim_win_is_valid(state.target_win) then return end
+  if state.query == "" then return end
+  
+  api.nvim_win_call(state.target_win, function()
+    local flags = direction > 0 and "" or "b"  -- b = backward
+    
+    -- Rechercher avec wrap
+    local found = vim.fn.search(state.query, flags .. "w")
+    if found > 0 then
+      vim.cmd("normal! zz")  -- Centrer la vue
+    end
+  end)
+  
+  -- Mettre à jour le compteur après le déplacement
+  update_counter()
+end
+
+-- Mettre à jour la recherche (highlights + compteur)
+local function update_search(query)
+  state.query = query
+  
+  -- Nettoyer anciens highlights
+  clear_highlights()
+  
+  if query == "" then
+    update_counter()
+    return
+  end
+  
+  -- Ajouter highlight dans la fenêtre cible
+  if state.target_win and api.nvim_win_is_valid(state.target_win) then
+    api.nvim_win_call(state.target_win, function()
+      local ok, id = pcall(vim.fn.matchadd, "Search", query)
+      if ok then
+        table.insert(state.match_ids, id)
+      end
+    end)
+  end
+  
+  -- Mettre à jour le compteur
+  update_counter()
+end
+
+-- Fermer proprement la recherche
+local function close_search()
+  -- Nettoyer les autocmds
+  for _, au in ipairs(state.autocmds) do
+    api.nvim_del_autocmd(au)
+  end
+  state.autocmds = {}
+  
+  -- Nettoyer les highlights
+  clear_highlights()
+  
+  -- Fermer la fenêtre
+  if state.win and api.nvim_win_is_valid(state.win) then
+    api.nvim_win_close(state.win, true)
+  end
+  
+  state.win = nil
+  state.buf = nil
+  state.count_extmark_id = nil
+end
+
 function M.open()
+  -- Récupérer la fenêtre et le buffer cibles
   state.target_win = api.nvim_get_current_win()
-  state.original_cursor = vim.fn.getpos(".")
+  state.target_buf = api.nvim_win_get_buf(state.target_win)
   state.original_view = vim.fn.winsaveview()
   state.query = ""
+  state.match_ids = {}
   
-  -- Create Floating Window (Top Center)
-  local width = math.floor(vim.o.columns * 0.25)
-  local col = math.floor((vim.o.columns - width) / 2)
-  
-  state.buf = api.nvim_create_buf(false, true)
-  -- Init with padding spaces to simulate margin
-  api.nvim_buf_set_lines(state.buf, 0, -1, false, {"  "})
-  
-  state.win = api.nvim_open_win(state.buf, true, {
-    relative = "editor",
-    width = width,
+  -- Créer la fenêtre de recherche
+  local win = window.create_centered({
+    width_pct = 0.25,
     height = 1,
-    row = 2, -- Top, just below tabline
-    col = col,
-    style = "minimal",
-    border = "rounded",
-    title = " Search ",
-    title_pos = "center",
+    title = "Search",
+    row_offset = 2
   })
   
-  -- Styling
-  vim.wo[state.win].winhl = "NormalFloat:NormalFloat,FloatBorder:FloatBorder,CursorLine:Visual"
-  vim.bo[state.buf].buftype = "nofile"
+  state.buf = win.buf
+  state.win = win.win
+  
+  -- Initialiser avec padding
+  api.nvim_buf_set_lines(state.buf, 0, -1, false, {"  "})
   
   vim.cmd("startinsert")
-  vim.api.nvim_win_set_cursor(state.win, {1, 2}) -- Start after padding
-
-  -- Event: Typing
-  api.nvim_create_autocmd("TextChangedI", {
+  api.nvim_win_set_cursor(state.win, {1, 2})
+  
+  -- Autocmd: Typing
+  local au_typing = api.nvim_create_autocmd("TextChangedI", {
     buffer = state.buf,
     callback = function()
       local line = api.nvim_buf_get_lines(state.buf, 0, 1, false)[1] or ""
+      
       -- Enforce padding
       if not line:match("^  ") then
         local fixed = "  " .. line:gsub("^%s*", "")
@@ -145,40 +184,57 @@ function M.open()
         line = fixed
       end
       
-      local query = line:sub(3) -- Remove padding for search
-      state.query = query
-      highlight_and_search(query, 0)
+      local query = line:sub(3)
+      update_search(query)
     end
   })
-
-  -- Action: Enter (Next Match)
+  table.insert(state.autocmds, au_typing)
+  
+  -- Autocmd: Suivi du curseur dans le buffer cible
+  local au_cursor = api.nvim_create_autocmd("CursorMoved", {
+    buffer = state.target_buf,
+    callback = function()
+      if state.query ~= "" then
+        update_counter()
+      end
+    end
+  })
+  table.insert(state.autocmds, au_cursor)
+  
+  -- Autocmd: Fermer si on quitte la fenêtre cible
+  local au_leave = api.nvim_create_autocmd("WinClosed", {
+    pattern = tostring(state.target_win),
+    once = true,
+    callback = function()
+      close_search()
+    end
+  })
+  table.insert(state.autocmds, au_leave)
+  
+  -- Keymap: Enter = occurrence suivante
   vim.keymap.set("i", "<CR>", function()
-    highlight_and_search(state.query, 1)
+    move_to_match(1)  -- 1 = forward
   end, { buffer = state.buf })
   
-  -- Action: Esc (Confirm & Close)
-  vim.keymap.set({"i", "n"}, "<Esc>", function()
-    -- Set the vim search register so 'n' works afterwards
-    if state.query ~= "" then
-      vim.fn.setreg("/", state.query)
-      -- Also add to history
-      vim.fn.histadd("search", state.query)
-    end
-    
-    api.nvim_win_close(state.win, true)
-    clear_highlights() -- Vim's native 'hlsearch' will take over if enabled
-    vim.o.hlsearch = true
+  -- Keymap: Shift+Enter = occurrence précédente
+  vim.keymap.set("i", "<S-CR>", function()
+    move_to_match(-1)  -- -1 = backward
   end, { buffer = state.buf })
-
-  -- Action: Ctrl+c (Cancel & Restore)
+  
+  -- Keymap: Esc = fermer (conserve position, retire highlights)
+  vim.keymap.set({"i", "n"}, "<Esc>", function()
+    close_search()
+  end, { buffer = state.buf })
+  
+  -- Keymap: Ctrl+C = annuler (restaure position originale)
   vim.keymap.set({"i", "n"}, "<C-c>", function()
-    api.nvim_win_close(state.win, true)
-    clear_highlights()
+    -- Restaurer la position originale
     if state.target_win and api.nvim_win_is_valid(state.target_win) then
       api.nvim_win_call(state.target_win, function()
         vim.fn.winrestview(state.original_view)
       end)
     end
+    close_search()
   end, { buffer = state.buf })
 end
 

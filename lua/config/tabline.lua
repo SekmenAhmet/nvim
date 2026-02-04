@@ -4,6 +4,26 @@ local M = {}
 
 -- Les couleurs sont définies dans config.colors
 
+-- Obtenir le niveau de diagnostic d'un buffer
+local function get_buffer_diagnostic_level(bufnr)
+  local diagnostics = vim.diagnostic.get(bufnr)
+  local has_error = false
+  local has_warn = false
+  
+  for _, d in ipairs(diagnostics) do
+    if d.severity == vim.diagnostic.severity.ERROR then
+      has_error = true
+      break
+    elseif d.severity == vim.diagnostic.severity.WARN then
+      has_warn = true
+    end
+  end
+  
+  if has_error then return "error" end
+  if has_warn then return "warn" end
+  return nil
+end
+
 function M.render()
   local line = ""
   
@@ -62,16 +82,33 @@ function M.render()
         name = vim.fn.fnamemodify(name, ":t")
       end
 
-      -- Clickable (Natif Neovim)
-      line = line .. "%" .. i .. "T"
+      -- Vérifier les diagnostics
+      local diag_level = get_buffer_diagnostic_level(buf)
+      
+      -- Clickable (Natif Neovim) - utilise le vrai buffer ID
+      line = line .. "%" .. buf .. "T"
 
+      -- Choisir le highlight selon l'état et les diagnostics
+      local hl_group
       if is_current then
-        -- Onglet Actif
-        line = line .. "%#TabLineSel# " .. name .. modified .. " "
+        if diag_level == "error" then
+          hl_group = "TabLineSelError"
+        elseif diag_level == "warn" then
+          hl_group = "TabLineSelWarn"
+        else
+          hl_group = "TabLineSel"
+        end
       else
-        -- Onglet Inactif
-        line = line .. "%#TabLine# " .. name .. modified .. " "
+        if diag_level == "error" then
+          hl_group = "TabLineError"
+        elseif diag_level == "warn" then
+          hl_group = "TabLineWarn"
+        else
+          hl_group = "TabLine"
+        end
       end
+
+      line = line .. "%#" .. hl_group .. "# " .. name .. modified .. " "
       
       -- Fin de la zone cliquable
       line = line .. "%T"
@@ -86,8 +123,14 @@ function M.render()
   -- Remplissage du reste de la ligne
   line = line .. "%#TabLineFill#%="
   
-  -- Indicateur à droite
-  line = line .. "%#TabLine#%999X   "
+  -- Indicateur à droite - compteur de buffers
+  local buf_count = 0
+  for _, buf in ipairs(buffers) do
+    if vim.bo[buf].buflisted then
+      buf_count = buf_count + 1
+    end
+  end
+  line = line .. "%#TabLine#%999X  " .. buf_count .. " "
 
   return line
 end
@@ -95,5 +138,12 @@ end
 -- Activer la tabline
 vim.opt.showtabline = 2 -- Toujours afficher
 vim.opt.tabline = "%!luaeval('require(\"config.tabline\").render()')"
+
+-- Rafraîchir la tabline quand on ferme ou change de buffer
+vim.api.nvim_create_autocmd({ "BufAdd", "BufDelete", "BufEnter" }, {
+  callback = function()
+    vim.cmd("redrawtabline")
+  end,
+})
 
 return M

@@ -34,11 +34,11 @@ local function check_trigger()
 end
 
 -- Debounce timer pour ne pas spammer <C-n> à chaque frappe
-local timer = nil
+-- Timer réutilisable unique - créé une seule fois, pas de fuite mémoire
+local timer = vim.uv.new_timer()
 vim.api.nvim_create_autocmd("TextChangedI", {
   callback = function()
-    if timer then timer:stop() end
-    timer = vim.loop.new_timer()
+    timer:stop()
     timer:start(100, 0, vim.schedule_wrap(check_trigger))
   end
 })

@@ -2,8 +2,9 @@
 -- Architecture: Async Spawn (libuv) + Dual Window UI
 
 local M = {}
-local uv = vim.loop
+local uv = vim.uv
 local ui = require("config.ui") -- Load UI for icons
+local window = require("config.window") -- Window utilities
 
 -- Configuration
 local CONFIG = {
@@ -22,8 +23,8 @@ local state = {
   job_handle = nil,
   results = {}, -- Raw results from grep
   line_map = {}, -- Maps buffer line to result index
-  timer_debounce = nil,
-  timer_preview = nil,
+  timer_debounce = vim.uv.new_timer(), -- Timer réutilisable unique
+  timer_preview = vim.uv.new_timer(),  -- Timer réutilisable unique
   last_query = "",
   last_preview_key = nil,
 }
@@ -61,19 +62,57 @@ local function update_preview(filename, lnum)
   if state.last_preview_key == key then return end
   state.last_preview_key = key
 
-  if state.timer_preview then state.timer_preview:stop() end
-  state.timer_preview = uv.new_timer()
-
+  state.timer_preview:stop()
   state.timer_preview:start(5, 0, vim.schedule_wrap(function()
     if not vim.api.nvim_buf_is_valid(state.buf_preview) then return end
     local stat = uv.fs_stat(filename)
-    if not stat or stat.type ~= "file" then return end
+    if not stat or stat.type ~= "file" then
+      vim.api.nvim_buf_set_lines(state.buf_preview, 0, -1, false, { " [File not found] " })
+      return
+    end
+
+    -- OPTIMISATION : Limiter la lecture aux lignes contextuelles
+    local context_lines = 50  -- 50 avant + 50 après = 100 lignes max
+    local line_length_estimate = 100
+    local max_read_size = context_lines * 2 * line_length_estimate  -- ~10KB
+    
+    local read_size = stat.size
+    local offset = 0
+    local is_truncated = false
+    
+    -- Si fichier gros, lire seulement le contexte
+    if stat.size > max_read_size then
+      is_truncated = true
+      -- Estimation grossière : lnum * taille_moyenne_ligne
+      offset = math.max(0, (lnum - context_lines) * line_length_estimate)
+      read_size = math.min(max_read_size, stat.size - offset)
+      
+      -- Aligner sur le début d'une ligne
+      if offset > 0 then
+        offset = math.max(0, offset - line_length_estimate)
+        read_size = math.min(max_read_size + line_length_estimate, stat.size - offset)
+      end
+    end
 
     uv.fs_open(filename, "r", 438, function(err, fd)
-      if err then return end
-      uv.fs_read(fd, stat.size, 0, function(err_read, data)
+      if err then
+        vim.schedule(function()
+          if vim.api.nvim_buf_is_valid(state.buf_preview) then
+            vim.api.nvim_buf_set_lines(state.buf_preview, 0, -1, false, { " [Cannot open file: " .. tostring(err) .. "] " })
+          end
+        end)
+        return
+      end
+      uv.fs_read(fd, read_size, offset, function(err_read, data)
         uv.fs_close(fd)
-        if err_read then return end
+        if err_read then
+          vim.schedule(function()
+            if vim.api.nvim_buf_is_valid(state.buf_preview) then
+              vim.api.nvim_buf_set_lines(state.buf_preview, 0, -1, false, { " [Read error: " .. tostring(err_read) .. "] " })
+            end
+          end)
+          return
+        end
         vim.schedule(function()
           if not vim.api.nvim_buf_is_valid(state.buf_preview) then return end
           local lines = vim.split(data or "", "\n")
@@ -82,12 +121,31 @@ local function update_preview(filename, lnum)
           local ft = vim.filetype.match({ filename = filename })
           if ft then vim.bo[state.buf_preview].filetype = ft end
 
-          pcall(vim.api.nvim_win_set_cursor, state.win_preview, {lnum, 0})
+          -- Calculer la ligne relative dans le contexte lu
+          local relative_lnum = lnum
+          if is_truncated then
+            -- Si on a lu un offset, trouver où est la ligne cible
+            relative_lnum = math.min(context_lines + 1, #lines)
+            -- Chercher la ligne contenant le numéro (approximatif)
+            for i, line in ipairs(lines) do
+              if i > 1 and i < #lines then
+                -- Heuristique : si on trouve un pattern similaire
+                if i >= context_lines - 5 and i <= context_lines + 5 then
+                  relative_lnum = i
+                  break
+                end
+              end
+            end
+          end
+          
+          relative_lnum = math.max(1, math.min(relative_lnum, #lines))
+          
+          pcall(vim.api.nvim_win_set_cursor, state.win_preview, {relative_lnum, 0})
           vim.api.nvim_win_call(state.win_preview, function() vim.cmd("normal! zz") end)
 
           local ns = vim.api.nvim_create_namespace("grep_preview")
           vim.api.nvim_buf_clear_namespace(state.buf_preview, ns, 0, -1)
-          vim.api.nvim_buf_add_highlight(state.buf_preview, ns, "Search", lnum - 1, 0, -1)
+          vim.api.nvim_buf_add_highlight(state.buf_preview, ns, "Search", relative_lnum - 1, 0, -1)
         end)
       end)
     end)
@@ -203,18 +261,32 @@ local function start_grep(query)
   state.job_handle = uv.spawn(cmd, {
     args = args,
     stdio = { nil, stdout, stderr },
-  }, function()
+  }, function(code, signal)
     stdout:read_stop()
     stderr:read_stop()
     stdout:close()
     stderr:close()
-    if state.job_handle then state.job_handle:close() end
+    if state.job_handle and not state.job_handle:is_closing() then
+      state.job_handle:close()
+    end
   end)
 
-  stderr:read_start(function(err, data) end)
+  stderr:read_start(function(err, data)
+    if err then
+      vim.schedule(function()
+        vim.notify("Grep stderr error: " .. tostring(err), vim.log.levels.WARN)
+      end)
+    end
+  end)
 
   local buffer = ""
   stdout:read_start(function(err, data)
+    if err then
+      vim.schedule(function()
+        vim.notify("Grep error: " .. tostring(err), vim.log.levels.ERROR)
+      end)
+      return
+    end
     if data then
       buffer = buffer .. data
       local lines = vim.split(buffer, "\n")
@@ -243,51 +315,40 @@ end
 
 -- 4. Create UI
 local function create_ui()
-  local total_width = math.floor(vim.o.columns * CONFIG.width_pct)
-  local total_height = math.floor(vim.o.lines * CONFIG.height_pct)
-  local row = math.floor((vim.o.lines - total_height) / 2)
-  local col = math.floor((vim.o.columns - total_width) / 2)
-  local preview_width = math.floor(total_width * CONFIG.preview_width_pct)
-  local list_width = total_width - preview_width - 2
-
-  state.buf_list = vim.api.nvim_create_buf(false, true)
-  state.win_list = vim.api.nvim_open_win(state.buf_list, true, {
-    relative = "editor", width = list_width, height = total_height, row = row, col = col,
-    style = "minimal", border = "rounded", title = " Live Grep ",
-  })
-  vim.bo[state.buf_list].filetype = "grep_list"
-
-  state.buf_preview = vim.api.nvim_create_buf(false, true)
-  state.win_preview = vim.api.nvim_open_win(state.buf_preview, false, {
-    relative = "editor", width = preview_width, height = total_height, row = row, col = col + list_width + 2,
-    style = "minimal", border = "rounded", title = " Preview ",
+  local wins = window.create_dual_pane({
+    width_pct = CONFIG.width_pct,
+    height_pct = CONFIG.height_pct,
+    preview_width_pct = CONFIG.preview_width_pct,
+    list_title = "Live Grep",
+    preview_title = "Preview",
+    list_filetype = "grep_list",
   })
 
-  vim.wo[state.win_list].cursorline = true
-  vim.wo[state.win_list].winhl = "NormalFloat:Normal,CursorLine:Visual"
-  vim.bo[state.buf_list].buftype = "nofile"
-  vim.wo[state.win_list].cursorcolumn = false
-  vim.wo[state.win_list].wrap = false
-  vim.wo[state.win_preview].winhl = "NormalFloat:Normal"
-  vim.bo[state.buf_preview].buftype = "nofile"
+  state.buf_list = wins.buf_list
+  state.win_list = wins.win_list
+  state.buf_preview = wins.buf_preview
+  state.win_preview = wins.win_preview
+
+  -- Enable line numbers for preview (grep specific)
   vim.wo[state.win_preview].number = true
 
-  local function scroll_preview(direction)
-    if vim.api.nvim_win_is_valid(state.win_preview) then
-      vim.api.nvim_win_call(state.win_preview, function()
-        local key = direction > 0 and "<C-d>" or "<C-u>"
-        vim.cmd("normal! " .. vim.api.nvim_replace_termcodes(key, true, false, true))
-      end)
-    end
-  end
-  vim.keymap.set({"i", "n"}, "<C-d>", function() scroll_preview(1) end, { buffer = state.buf_list })
-  vim.keymap.set({"i", "n"}, "<C-u>", function() scroll_preview(-1) end, { buffer = state.buf_list })
+  -- Setup scroll preview mappings
+  window.setup_scroll_preview(state, state.buf_list)
 
-  vim.api.nvim_create_autocmd("WinClosed", {
-    pattern = tostring(state.win_list), once = true,
-    callback = function()
-      if state.win_preview and vim.api.nvim_win_is_valid(state.win_preview) then vim.api.nvim_win_close(state.win_preview, true) end
-      if state.job_handle and not state.job_handle:is_closing() then state.job_handle:close() end
+  -- Setup auto-close avec nettoyage des highlights
+  window.setup_auto_close(state, {
+    on_close = function()
+      -- Nettoyer les highlights du preview
+      local ns = vim.api.nvim_create_namespace("grep_preview")
+      if state.buf_preview and vim.api.nvim_buf_is_valid(state.buf_preview) then
+        vim.api.nvim_buf_clear_namespace(state.buf_preview, ns, 0, -1)
+      end
+      -- Nettoyer tous les buffers de highlights grep
+      for _, buf in ipairs(vim.api.nvim_list_bufs()) do
+        if vim.api.nvim_buf_is_valid(buf) then
+          vim.api.nvim_buf_clear_namespace(buf, ns, 0, -1)
+        end
+      end
     end
   })
 end
@@ -313,8 +374,7 @@ function M.open()
         end
 
         local query = line:sub(3)
-        if state.timer_debounce then state.timer_debounce:stop() end
-        state.timer_debounce = uv.new_timer()
+        state.timer_debounce:stop()
         state.timer_debounce:start(20, 0, vim.schedule_wrap(function() start_grep(query) end))
       end
     end
@@ -337,7 +397,7 @@ function M.open()
   })
 
   local function close()
-    if vim.api.nvim_win_is_valid(state.win_list) then vim.api.nvim_win_close(state.win_list, true) end
+    window.close_windows(state)
   end
 
   local function open_result()
@@ -345,7 +405,17 @@ function M.open()
     local row = cursor[1]
     local res_idx = state.line_map[row] or (row == 1 and 1 or nil)
     local res = res_idx and state.results[res_idx]
-    if res then close(); require("config.ui").open_in_normal_win(res.filename, res.lnum) end
+    if res then 
+      close()
+      -- Nettoyer les highlights avant d'ouvrir
+      local ns = vim.api.nvim_create_namespace("grep_preview")
+      for _, buf in ipairs(vim.api.nvim_list_bufs()) do
+        if vim.api.nvim_buf_is_valid(buf) then
+          vim.api.nvim_buf_clear_namespace(buf, ns, 0, -1)
+        end
+      end
+      require("config.ui").open_in_normal_win(res.filename, res.lnum) 
+    end
   end
 
   local opts = { buffer = state.buf_list }

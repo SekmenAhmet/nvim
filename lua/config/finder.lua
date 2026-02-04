@@ -2,8 +2,9 @@
 -- Architecture: Async Spawn (libuv) + Dual Window UI
 
 local M = {}
-local uv = vim.loop
+local uv = vim.uv
 local ui = require("config.ui") -- Load UI module
+local window = require("config.window") -- Window utilities
 
 -- Configuration
 local CONFIG = {
@@ -22,7 +23,7 @@ local state = {
   job_handle = nil,
   files = {}, -- Raw list of all files
   filtered_files = {}, -- Displayed files
-  preview_timer = nil,
+  preview_timer = vim.uv.new_timer(), -- Timer réutilisable unique
   last_preview_file = nil,
 }
 
@@ -37,28 +38,69 @@ local ignore_list = {
   "-not -path '*/venv/*'",
 }
 
--- Smart Scoring Algorithm
+-- Smart Fuzzy Scoring Algorithm
+-- "uc" matches "user_controller", "conf" matches "my_config"
 local function score_file(file, query_lower)
+  if query_lower == "" then return 1 end
+  
   local file_lower = file:lower()
-  -- Extract filename from path
   local filename = file_lower:match("^.+/(.+)$") or file_lower
-
-  -- 1. Exact filename match (Best)
-  if filename == query_lower then return 100 end
-
-  -- 2. Filename starts with query
-  if vim.startswith(filename, query_lower) then return 80 end
-
-  -- 3. Filename contains query
-  if filename:find(query_lower, 1, true) then return 60 end
-
-  -- 4. Path contains query
-  if file_lower:find(query_lower, 1, true) then return 40 end
-
-  -- 5. Fuzzy / Acronym (Optional, simple implementation)
-  -- If query is "mc", matches "main_controller"
-  -- Skipped for now to keep it fast, unless requested.
-
+  
+  -- Vérifier match exact d'abord
+  if filename == query_lower then return 1000 end
+  if vim.startswith(filename, query_lower) then return 800 end
+  
+  -- Fuzzy matching
+  local query_idx = 1
+  local score = 0
+  local last_match = 0
+  local consecutive = 0
+  
+  for i = 1, #filename do
+    if filename:sub(i, i) == query_lower:sub(query_idx, query_idx) then
+      -- Bonus début de fichier
+      if i == 1 then score = score + 15 end
+      
+      -- Bonus début de mot (après _ - . /)
+      if i > 1 and filename:sub(i-1, i-1):match("[%-_%.]") then
+        score = score + 12
+      end
+      
+      -- Bonus caractères consécutifs
+      if last_match == i - 1 then
+        consecutive = consecutive + 1
+        score = score + 8 + consecutive * 2
+      else
+        consecutive = 0
+        score = score + 5
+      end
+      
+      -- Malus distance entre matches
+      if last_match > 0 and i - last_match > 1 then
+        score = score - (i - last_match - 1) * 2
+      end
+      
+      query_idx = query_idx + 1
+      last_match = i
+      
+      if query_idx > #query_lower then
+        -- Match complet ! Bonus selon la position
+        local remaining_chars = #filename - i
+        return score + 100 + math.max(0, 50 - remaining_chars)
+      end
+    end
+  end
+  
+  -- Fallback : substring si fuzzy échoue
+  if filename:find(query_lower, 1, true) then
+    return 100
+  end
+  
+  -- Path match (dernier recours)
+  if file_lower:find(query_lower, 1, true) then
+    return 50
+  end
+  
   return 0
 end
 
@@ -74,13 +116,12 @@ local function update_preview(filepath)
   if state.last_preview_file == filepath then return end
   state.last_preview_file = filepath
 
-    if state.preview_timer then state.preview_timer:stop() end
-    state.preview_timer = uv.new_timer()
+  state.preview_timer:stop()
+  state.preview_timer:start(5, 0, vim.schedule_wrap(function()
+    if not vim.api.nvim_buf_is_valid(state.buf_preview) then return end
 
-    state.preview_timer:start(5, 0, vim.schedule_wrap(function()
-      if not vim.api.nvim_buf_is_valid(state.buf_preview) then return end
-
-      local stat = uv.fs_stat(filepath)    if not stat or stat.type ~= "file" then
+    local stat = uv.fs_stat(filepath)
+    if not stat or stat.type ~= "file" then
       vim.api.nvim_buf_set_lines(state.buf_preview, 0, -1, false, { " [Directory or Not Found] " })
       return
     end
@@ -91,10 +132,24 @@ local function update_preview(filepath)
     end
 
     uv.fs_open(filepath, "r", 438, function(err, fd)
-      if err then return end
+      if err then
+        vim.schedule(function()
+          if vim.api.nvim_buf_is_valid(state.buf_preview) then
+            vim.api.nvim_buf_set_lines(state.buf_preview, 0, -1, false, { " [Cannot read file: " .. tostring(err) .. "] " })
+          end
+        end)
+        return
+      end
       uv.fs_read(fd, 4096, 0, function(err_read, data)
         uv.fs_close(fd)
-        if err_read then return end
+        if err_read then
+          vim.schedule(function()
+            if vim.api.nvim_buf_is_valid(state.buf_preview) then
+              vim.api.nvim_buf_set_lines(state.buf_preview, 0, -1, false, { " [Read error: " .. tostring(err_read) .. "] " })
+            end
+          end)
+          return
+        end
 
         vim.schedule(function()
           if not vim.api.nvim_buf_is_valid(state.buf_preview) then return end
@@ -116,82 +171,26 @@ end
 
 -- 2. Create UI
 local function create_ui()
-  local total_width = math.floor(vim.o.columns * CONFIG.width_pct)
-  local total_height = math.floor(vim.o.lines * CONFIG.height_pct)
-  local row = math.floor((vim.o.lines - total_height) / 2)
-  local col = math.floor((vim.o.columns - total_width) / 2)
-
-  local preview_width = math.floor(total_width * CONFIG.preview_width_pct)
-  local list_width = total_width - preview_width - 2
-
-  -- Buffers
-  state.buf_list = vim.api.nvim_create_buf(false, true)
-  state.buf_preview = vim.api.nvim_create_buf(false, true)
-
-  -- Set filetype for completion exclusion
-  vim.bo[state.buf_list].filetype = "fzf_list"
-  vim.bo[state.buf_preview].filetype = "fzf_preview"
-
-  -- Windows
-  state.win_list = vim.api.nvim_open_win(state.buf_list, true, {
-    relative = "editor",
-    width = list_width,
-    height = total_height,
-    row = row,
-    col = col,
-    style = "minimal",
-    border = "rounded",
-    title = " Find Files ",
+  local wins = window.create_dual_pane({
+    width_pct = CONFIG.width_pct,
+    height_pct = CONFIG.height_pct,
+    preview_width_pct = CONFIG.preview_width_pct,
+    list_title = "Find Files",
+    preview_title = "Preview",
+    list_filetype = "fzf_list",
+    preview_filetype = "fzf_preview",
   })
 
-  state.win_preview = vim.api.nvim_open_win(state.buf_preview, false, {
-    relative = "editor",
-    width = preview_width,
-    height = total_height,
-    row = row,
-    col = col + list_width + 2,
-    style = "minimal",
-    border = "rounded",
-    title = " Preview ",
-  })
+  state.buf_list = wins.buf_list
+  state.win_list = wins.win_list
+  state.buf_preview = wins.buf_preview
+  state.win_preview = wins.win_preview
 
-  -- Styling
-  vim.wo[state.win_list].cursorline = true
-  vim.wo[state.win_list].winhl = "NormalFloat:Normal,CursorLine:Visual"
-  vim.bo[state.buf_list].buftype = "nofile"
-  -- Menu-like behavior
-  vim.wo[state.win_list].cursorcolumn = false
-  vim.wo[state.win_list].list = false
-  vim.wo[state.win_list].wrap = false
+  -- Setup scroll preview mappings
+  window.setup_scroll_preview(state, state.buf_list)
 
-  vim.wo[state.win_preview].winhl = "NormalFloat:Normal"
-
-  -- Scroll Preview Mappings (Power User Feature)
-  local function scroll_preview(direction)
-    if vim.api.nvim_win_is_valid(state.win_preview) then
-      vim.api.nvim_win_call(state.win_preview, function()
-        local key = direction > 0 and "<C-d>" or "<C-u>"
-        vim.cmd("normal! " .. vim.api.nvim_replace_termcodes(key, true, false, true))
-      end)
-    end
-  end
-  vim.keymap.set({"i", "n"}, "<C-d>", function() scroll_preview(1) end, { buffer = state.buf_list })
-  vim.keymap.set({"i", "n"}, "<C-u>", function() scroll_preview(-1) end, { buffer = state.buf_list })
-
-  -- AUTO-CLOSE Logic: If list window closes, close preview
-  vim.api.nvim_create_autocmd("WinClosed", {
-    pattern = tostring(state.win_list),
-    once = true,
-    callback = function()
-      if state.win_preview and vim.api.nvim_win_is_valid(state.win_preview) then
-        vim.api.nvim_win_close(state.win_preview, true)
-      end
-      -- Cleanup job
-      if state.job_handle and not state.job_handle:is_closing() then
-         state.job_handle:close()
-      end
-    end
-  })
+  -- Setup auto-close
+  window.setup_auto_close(state)
 end
 
 -- 3. Filter & Render
@@ -290,18 +289,25 @@ local function start_scan(on_update)
   state.job_handle = uv.spawn(cmd, {
     args = args,
     stdio = { nil, stdout, stderr },
-  }, function()
+  }, function(code, signal)
     stdout:read_stop()
     stderr:read_stop()
     stdout:close()
     stderr:close()
-    if state.job_handle then state.job_handle:close() end
+    if state.job_handle and not state.job_handle:is_closing() then
+      state.job_handle:close()
+    end
     state.job_handle = nil
   end)
 
   local buffer = ""
   stdout:read_start(function(err, data)
-    assert(not err, err)
+    if err then
+      vim.schedule(function()
+        vim.notify("Finder error: " .. tostring(err), vim.log.levels.ERROR)
+      end)
+      return
+    end
     if data then
       buffer = buffer .. data
       local lines = vim.split(buffer, "\n")
@@ -365,9 +371,7 @@ function M.open()
 
   -- Actions
   local function close()
-    if vim.api.nvim_win_is_valid(state.win_list) then
-      vim.api.nvim_win_close(state.win_list, true)
-    end
+    window.close_windows(state)
     -- WinClosed autocommand handles the rest
   end
 

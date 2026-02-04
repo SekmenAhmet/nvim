@@ -42,12 +42,12 @@ vim.api.nvim_create_autocmd("VimEnter", {
   callback = function()
     -- Only run if no arguments were passed (opening directory)
     if vim.fn.argc() == 0 then
-      local cwd = vim.loop.cwd()
-      local handle = vim.loop.fs_scandir(cwd)
+      local cwd = vim.uv.cwd()
+      local handle = vim.uv.fs_scandir(cwd)
       local files = {}
       if handle then
         while true do
-          local name, type = vim.loop.fs_scandir_next(handle)
+          local name, type = vim.uv.fs_scandir_next(handle)
           if not name then break end
           if not name:match("^%.") then
             table.insert(files, {name=name, type=type})
