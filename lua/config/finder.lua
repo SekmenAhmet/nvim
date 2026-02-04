@@ -74,14 +74,13 @@ local function update_preview(filepath)
   if state.last_preview_file == filepath then return end
   state.last_preview_file = filepath
 
-  if state.preview_timer then state.preview_timer:stop() end
-  state.preview_timer = uv.new_timer()
+    if state.preview_timer then state.preview_timer:stop() end
+    state.preview_timer = uv.new_timer()
 
-  state.preview_timer:start(10, 0, vim.schedule_wrap(function()
-    if not vim.api.nvim_buf_is_valid(state.buf_preview) then return end
+    state.preview_timer:start(5, 0, vim.schedule_wrap(function()
+      if not vim.api.nvim_buf_is_valid(state.buf_preview) then return end
 
-    local stat = uv.fs_stat(filepath)
-    if not stat or stat.type ~= "file" then
+      local stat = uv.fs_stat(filepath)    if not stat or stat.type ~= "file" then
       vim.api.nvim_buf_set_lines(state.buf_preview, 0, -1, false, { " [Directory or Not Found] " })
       return
     end

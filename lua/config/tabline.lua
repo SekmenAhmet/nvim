@@ -2,10 +2,7 @@
 
 local M = {}
 
--- Définition des couleurs personnalisées
-vim.api.nvim_set_hl(0, "TabLine", { link = "Comment" })      -- Onglets inactifs
-vim.api.nvim_set_hl(0, "TabLineSel", { link = "Normal", bold = true }) -- Onglet actif (Bold)
-vim.api.nvim_set_hl(0, "TabLineFill", { link = "Normal" })   -- Fond
+-- Les couleurs sont définies dans config.colors
 
 function M.render()
   local line = ""

@@ -110,6 +110,9 @@ function M.open()
   local col = math.floor((vim.o.columns - width) / 2)
   
   state.buf = api.nvim_create_buf(false, true)
+  -- Init with padding spaces to simulate margin
+  api.nvim_buf_set_lines(state.buf, 0, -1, false, {"  "})
+  
   state.win = api.nvim_open_win(state.buf, true, {
     relative = "editor",
     width = width,
@@ -127,14 +130,24 @@ function M.open()
   vim.bo[state.buf].buftype = "nofile"
   
   vim.cmd("startinsert")
+  vim.api.nvim_win_set_cursor(state.win, {1, 2}) -- Start after padding
 
   -- Event: Typing
   api.nvim_create_autocmd("TextChangedI", {
     buffer = state.buf,
     callback = function()
       local line = api.nvim_buf_get_lines(state.buf, 0, 1, false)[1] or ""
-      state.query = line
-      highlight_and_search(line, 0)
+      -- Enforce padding
+      if not line:match("^  ") then
+        local fixed = "  " .. line:gsub("^%s*", "")
+        api.nvim_buf_set_lines(state.buf, 0, 1, false, {fixed})
+        vim.api.nvim_win_set_cursor(state.win, {1, #fixed})
+        line = fixed
+      end
+      
+      local query = line:sub(3) -- Remove padding for search
+      state.query = query
+      highlight_and_search(query, 0)
     end
   })
 

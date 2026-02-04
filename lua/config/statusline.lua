@@ -1,60 +1,63 @@
--- Statusline Native Customisée
+-- Statusline Native Customisée (Optimisée)
 
 local M = {}
 
--- 1. Récupération de la branche Git (Optimisé)
--- On ne le lance que sur BufEnter pour ne pas laguer
+-- 1. Récupération Git Optimisée (Lecture Fichier)
 local function get_git_branch()
-  local branch = vim.fn.system("git branch --show-current 2> /dev/null"):gsub("\n", "")
-  if branch ~= "" then
-    return "  " .. branch .. " "
-  else
-    return ""
+  local git_dir = vim.fn.finddir(".git", ";")
+  if git_dir == "" then return "" end
+  
+  local head_file = git_dir .. "/HEAD"
+  local f = io.open(head_file, "r")
+  if not f then return "" end
+  
+  local content = f:read("*all")
+  f:close()
+  
+  -- Parse "ref: refs/heads/master"
+  local branch = content:match("ref: refs/heads/(.+)")
+  if branch then
+    return "  " .. branch:gsub("\n", "") .. " "
   end
+  return "" -- Detached head or other state, ignored for simplicity
 end
 
-vim.api.nvim_create_autocmd({ "BufEnter", "FocusGained" }, {
+-- Update branch only on BufEnter/DirChanged, not every redraw
+vim.api.nvim_create_autocmd({ "BufEnter", "FocusGained", "DirChanged" }, {
   callback = function()
     vim.b.git_branch = get_git_branch()
   end
 })
 
--- 2. Couleurs selon le mode
--- On utilise les groupes de highlight par défaut pour que ça marche avec tous les thèmes
-local modes = {
-  ['n']  = { 'NORMAL', 'StatusLineNormal' },
-  ['no'] = { 'NORMAL', 'StatusLineNormal' },
-  ['i']  = { 'INSERT', 'StatusLineInsert' },
-  ['v']  = { 'VISUAL', 'StatusLineVisual' },
-  ['V']  = { 'V-LINE', 'StatusLineVisual' },
-  [''] = { 'V-BLOCK', 'StatusLineVisual' },
-  ['c']  = { 'COMMAND', 'StatusLineCmd' },
-  ['s']  = { 'SELECT', 'StatusLineVisual' },
-  ['S']  = { 'S-LINE', 'StatusLineVisual' },
-  ['R']  = { 'REPLACE', 'StatusLineReplace' },
-}
-
--- Définition des highlights (Link vers des groupes standards)
-vim.api.nvim_set_hl(0, 'StatusLineNormal', { link = 'Function' })
-vim.api.nvim_set_hl(0, 'StatusLineInsert', { link = 'String' })
-vim.api.nvim_set_hl(0, 'StatusLineVisual', { link = 'Statement' })
-vim.api.nvim_set_hl(0, 'StatusLineCmd',    { link = 'Comment' })
-vim.api.nvim_set_hl(0, 'StatusLineReplace', { link = 'Error' })
-
--- 3. Fonction de construction de la ligne
+-- 2. Fonction de rendu
 function M.render()
   local current_mode = vim.api.nvim_get_mode().mode
-  local mode_info = modes[current_mode] or { 'UNKNOWN', 'StatusLine' }
-  local mode_name = mode_info[1]
-  local mode_hl = mode_info[2]
+  -- Highlights are now in colors.lua (StatusLineNormal, etc)
+  
+  local mode_map = {
+    ['n'] = 'NORMAL', ['no'] = 'NORMAL', ['v'] = 'VISUAL', ['V'] = 'V-LINE',
+    [''] = 'V-BLOCK', ['s'] = 'SELECT', ['S'] = 'S-LINE', [''] = 'S-BLOCK',
+    ['i'] = 'INSERT', ['ic'] = 'INSERT', ['R'] = 'REPLACE', ['Rv'] = 'V-REPLACE',
+    ['c'] = 'COMMAND', ['cv'] = 'VIM EX', ['ce'] = 'EX', ['r'] = 'PROMPT',
+    ['rm'] = 'MOAR', ['r?'] = 'CONFIRM', ['!'] = 'SHELL', ['t'] = 'TERMINAL',
+  }
+  
+  local mode_name = mode_map[current_mode] or 'UNKNOWN'
+  
+  -- Dynamic Highlight based on mode
+  local mode_hl = "StatusLineNormal"
+  if current_mode:match("^i") then mode_hl = "StatusLineInsert"
+  elseif current_mode:match("^[vV]") then mode_hl = "StatusLineVisual"
+  elseif current_mode == "R" then mode_hl = "StatusLineReplace"
+  elseif current_mode == "c" then mode_hl = "StatusLineCmd"
+  end
 
   local git = vim.b.git_branch or ""
-  local file_name = "%f" -- Chemin relatif
-  local modified = "%m"  -- [+] si modifié
-  local line_col = "%l:%c" -- Ligne:Colonne
-  local percentage = "%p%%" -- Pourcentage
+  local file_name = "%f"
+  local modified = "%m"
+  local line_col = "%l:%c"
+  local percentage = "%p%%"
   
-  -- Startup Time (si disponible)
   local startup = ""
   if vim.g.startup_time then
     startup = string.format(" ⚡ %.1fms ", vim.g.startup_time)
@@ -66,8 +69,7 @@ function M.render()
   )
 end
 
--- Activer la statusline
 vim.opt.statusline = "%!luaeval('require(\"config.statusline\").render()')"
-vim.opt.laststatus = 3 -- Une seule barre globale (optionnel, mets 2 pour une par fenêtre)
+vim.opt.laststatus = 3
 
 return M

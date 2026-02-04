@@ -103,23 +103,29 @@ function M.setup()
   set("@tag.delimiter", { fg = c.fg_dark })
   
   -- 4. PLUGIN SPECIFIC
-  -- Finder / Grep (Highlights custom que j'ai utilisés dans ton finder.lua)
+  -- Finder / Grep / Tree
   set("TreeDir", { fg = c.blue, bold = true })
   set("TreeFile", { fg = c.fg })
   set("TreeRoot", { fg = c.purple, bold = true, underline = true })
   
-  -- Pmenu (Autocompletion)
+  -- Statusline
+  set("StatusLineNormal", { fg = c.blue, bg = c.bg_highlight, bold = true })
+  set("StatusLineInsert", { fg = c.green, bg = c.bg_highlight, bold = true })
+  set("StatusLineVisual", { fg = c.magenta, bg = c.bg_highlight, bold = true })
+  set("StatusLineReplace", { fg = c.red, bg = c.bg_highlight, bold = true })
+  set("StatusLineCmd", { fg = c.yellow, bg = c.bg_highlight, bold = true })
+  
+  -- Tabline
+  set("TabLine", { fg = c.comment, bg = c.bg_dark })
+  set("TabLineSel", { fg = c.blue, bg = c.bg, bold = true })
+  set("TabLineFill", { bg = c.bg_dark })
+
+  -- Pmenu
   set("Pmenu", { bg = c.bg_dark, fg = c.fg })
   set("PmenuSel", { bg = c.bg_visual, fg = "NONE", bold = true })
   set("PmenuThumb", { bg = c.fg_gutter })
 
-  -- LSP
-  set("DiagnosticError", { fg = c.red })
-  set("DiagnosticWarn", { fg = c.yellow })
-  set("DiagnosticInfo", { fg = c.cyan })
-  set("DiagnosticHint", { fg = c.comment })
-  
-  -- Register Icon Highlights
+  -- Register UI Icon Highlights
   require("config.ui").setup()
 end
 
