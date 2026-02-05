@@ -137,7 +137,8 @@ local function get_items(path)
   while true do
     local name, type = vim.uv.fs_scandir_next(handle)
     if not name then break end
-    if not name:match("^%.") then -- Hide dotfiles
+    -- Show .env files specifically, hide other dotfiles
+    if name == ".env" or not name:match("^%.") then
       table.insert(entries, { name = name, type = type, path = path .. "/" .. name })
     end
   end
