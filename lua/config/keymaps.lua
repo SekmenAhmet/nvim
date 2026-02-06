@@ -124,6 +124,9 @@ vim.keymap.set("n", "/", function() require("config.search").open() end, { desc 
 -- Native Cmdline (Replace :)
 vim.keymap.set({"n", "v"}, ":", function() require("config.cmdline").open() end, { desc = "Command Line (Native)" })
 
+-- Native REST Client (Postman-like)
+vim.keymap.set({"n", "i"}, "<C-p>", function() require("config.rest").open() end, { desc = "Open REST Client" })
+
 -- Terminal (Ctrl+t)
 local function toggle_term() require("config.terminal").toggle() end
 vim.keymap.set({"n", "i", "t"}, "<C-t>", toggle_term, { desc = "Toggle terminal" })

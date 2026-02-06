@@ -412,11 +412,13 @@ vim.api.nvim_create_autocmd({ "FocusGained", "BufEnter" }, {
 -- Rafraîchir quand les diagnostics changent
 vim.api.nvim_create_autocmd("DiagnosticChanged", {
   callback = function()
-    if M.win and vim.api.nvim_win_is_valid(M.win) then
-      draw_impl()
-    end
-    -- Rafraîchir aussi la tabline
-    vim.cmd("redrawtabline")
+    vim.schedule(function()
+      if M.win and vim.api.nvim_win_is_valid(M.win) then
+        draw_impl()
+      end
+      -- Rafraîchir aussi la tabline
+      vim.cmd("redrawtabline")
+    end)
   end
 })
 
