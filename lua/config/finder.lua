@@ -23,6 +23,8 @@ local state = {
   job_handle = nil,
   files = {}, -- Raw list of all files
   filtered_files = {}, -- Displayed files
+  last_results = {}, -- Objects {file, score} for incremental filtering
+  last_query = "",
   preview_timer = vim.uv.new_timer(), -- Timer réutilisable unique
   last_preview_file = nil,
 }
@@ -202,12 +204,18 @@ local function filter_and_render(query)
   local highlights = {} -- Store highlight instructions
 
   local query_lower = query:lower()
-  state.filtered_files = {}
+  
+  -- INCREMENTAL FILTERING LOGIC
+  local source_list = state.files
+  if #query > #state.last_query and query:sub(1, #state.last_query) == state.last_query and #state.last_results > 0 then
+    source_list = {}
+    for _, item in ipairs(state.last_results) do table.insert(source_list, item.file) end
+  end
 
   -- FILTER & SCORE
   local scored_files = {}
 
-  for _, file in ipairs(state.files) do
+  for _, file in ipairs(source_list) do
     if query == "" then
        table.insert(scored_files, { file = file, score = 1 })
        if #scored_files > 500 then break end
@@ -219,12 +227,17 @@ local function filter_and_render(query)
     end
   end
 
+  -- Update state for next incremental search
+  state.last_query = query
+  state.last_results = scored_files
+
   -- SORT by Score DESC
   if query ~= "" then
     table.sort(scored_files, function(a, b) return a.score > b.score end)
   end
 
   -- DISPLAY
+  state.filtered_files = {}
   -- Header
   table.insert(results, padding .. query)
   table.insert(results, padding .. string.rep("─", vim.api.nvim_win_get_width(state.win_list) - 4))

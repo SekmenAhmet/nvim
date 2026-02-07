@@ -6,6 +6,7 @@ vim.ui.select = M.select -- Defined below (placeholder, referenced from previous
 
 -- Icon Configuration (Icon + Hex Color)
 local icons_config = {
+  -- Languages & Extensions
   lua  = { icon = "", color = "#51a0cf" },
   py   = { icon = "", color = "#ffbc03" },
   js   = { icon = "", color = "#cbcb41" },
@@ -37,30 +38,70 @@ local icons_config = {
   conf = { icon = "", color = "#6d8086" },
   git  = { icon = "", color = "#f14e32" },
   Dockerfile = { icon = "", color = "#384d54" },
+  dockerignore = { icon = "", color = "#384d54" },
+  sql  = { icon = "", color = "#dadada" },
+  rb   = { icon = "", color = "#701516" },
+  rake = { icon = "", color = "#701516" },
+  swift = { icon = "", color = "#e37933" },
+  lock = { icon = "", color = "#bbbbbb" },
+  vue = { icon = "", color = "#42b883" },
+  svelte = { icon = "", color = "#ff3e00" },
+  jsonc = { icon = "", color = "#cbcb41" },
+  json5 = { icon = "", color = "#cbcb41" },
+  graphql = { icon = "", color = "#e10098" },
+  gql = { icon = "", color = "#e10098" },
+  
+  -- Common Files (Exact matches)
+  [".gitignore"] = { icon = "", color = "#f14e32" },
+  [".gitconfig"] = { icon = "", color = "#f14e32" },
+  ["Makefile"]   = { icon = "", color = "#6d8086" },
+  ["package.json"] = { icon = "", color = "#689f63" },
+  ["package-lock.json"] = { icon = "", color = "#7bb077" },
+  ["node_modules"] = { icon = "", color = "#E8274B" },
+  ["LICENSE"] = { icon = "", color = "#d0bf41" },
+  ["README.md"] = { icon = "", color = "#42a5f5" },
+  [".env"] = { icon = "", color = "#faf743" },
+
+  -- Media
+  png = { icon = "", color = "#a074c4" },
+  jpg = { icon = "", color = "#a074c4" },
+  jpeg = { icon = "", color = "#a074c4" },
+  gif = { icon = "", color = "#a074c4" },
+  svg = { icon = "", color = "#ffb13b" },
+  pdf = { icon = "", color = "#ff3333" },
+  
+  -- Archives
+  zip = { icon = "", color = "#dcb239" },
+  tar = { icon = "", color = "#dcb239" },
+  gz = { icon = "", color = "#dcb239" },
+  ["7z"] = { icon = "", color = "#dcb239" },
 }
 
 -- Setup function to define highlight groups
 function M.setup()
-  for ext, data in pairs(icons_config) do
-    vim.api.nvim_set_hl(0, "Icon" .. ext, { fg = data.color })
+  for name, data in pairs(icons_config) do
+    -- Clean name for HL group (no dots)
+    local hl_name = name:gsub("%.", "")
+    vim.api.nvim_set_hl(0, "Icon" .. hl_name, { fg = data.color })
   end
   vim.api.nvim_set_hl(0, "IconDefault", { fg = "#89e051" })
   vim.api.nvim_set_hl(0, "IconDir", { fg = "#7aa2f7" }) -- Folder color (Blue)
+  vim.api.nvim_set_hl(0, "IconDirOpen", { fg = "#9ece6a" }) -- Open Folder color (Greenish)
 end
 
 -- Return { icon = "...", hl = "Icon..." }
 function M.get_icon_data(filename)
   local name = vim.fn.fnamemodify(filename, ":t")
-  local ext = filename:match("^.+%.(.+)$") or name
+  local ext = name:match("^.+%.(.+)$")
   
   -- Exact match first
   if icons_config[name] then
-    return { icon = icons_config[name].icon, hl = "Icon" .. name }
+    return { icon = icons_config[name].icon, hl = "Icon" .. name:gsub("%.", "") }
   end
   
   -- Extension match
   if ext and icons_config[ext:lower()] then
-    return { icon = icons_config[ext:lower()].icon, hl = "Icon" .. ext:lower() }
+    return { icon = icons_config[ext:lower()].icon, hl = "Icon" .. ext:lower():gsub("%.", "") }
   end
   
   return { icon = "", hl = "IconDefault" }

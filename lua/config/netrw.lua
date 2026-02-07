@@ -155,33 +155,22 @@ end
 draw_impl = function()
   if not M.buf or not vim.api.nvim_buf_is_valid(M.buf) then return end
   
-  vim.api.nvim_buf_set_option(M.buf, "modifiable", true)
+  vim.bo[M.buf].modifiable = true
   
   local lines = {}
   M.items = {}
   
-  -- Header
-  table.insert(lines, "  " .. vim.fn.fnamemodify(M.root, ":~"))
+  -- Header simple
+  table.insert(lines, "  " .. vim.fn.fnamemodify(M.root, ":~"))
   table.insert(M.items, { path = M.root, type = "directory" })
 
   local function traverse(path, depth)
     local entries = get_items(path)
     for _, item in ipairs(entries) do
-      local prefix = "  " .. string.rep("  ", depth)
+      local indent = string.rep("  ", depth)
+      if depth > 0 then indent = "│ " .. string.rep("  ", depth - 1) end
       
-      -- Git status symbol
-      local git_symbol = ""
       local git_status = get_git_status_for_file(item.path)
-      if git_status then
-        local symbols = {
-          M = "✗ ",
-          A = "+ ",
-          ["?"] = "? ",
-          D = "- "
-        }
-        git_symbol = symbols[git_status] or ""
-      end
-      
       local icon = ""
       
       if item.type == "directory" then
@@ -190,8 +179,7 @@ draw_impl = function()
         icon = ui.get_icon_data(item.name).icon .. " "
       end
       
-      -- Ajouter le symbole git avant l'icône
-      table.insert(lines, prefix .. git_symbol .. icon .. item.name)
+      table.insert(lines, " " .. indent .. icon .. item.name)
       table.insert(M.items, { 
         path = item.path, 
         type = item.type,
@@ -206,82 +194,61 @@ draw_impl = function()
   end
   
   traverse(M.root, 0)
-  
   vim.api.nvim_buf_set_lines(M.buf, 0, -1, false, lines)
   
-  -- Apply highlights
+  -- Application des highlights
   vim.api.nvim_buf_clear_namespace(M.buf, -1, 0, -1)
   
   for i, item in ipairs(M.items) do
-    local line_idx = i - 1
-    local line_text = lines[i]
+    local idx = i - 1
+    local line = lines[i]
     
     if i == 1 then
-      vim.api.nvim_buf_add_highlight(M.buf, -1, "TreeRoot", line_idx, 0, -1)
+      vim.api.nvim_buf_add_highlight(M.buf, -1, "Directory", idx, 0, -1)
     else
-      -- Trouver les positions
-      local content_start = line_text:find("[^ ]")
-      if content_start then
-        -- Calculer la position après le préfixe d'indentation
-        local prefix_len = content_start - 1
+      -- 1. Colorer les guides d'indentation
+      local guide_pos = line:find("│")
+      if guide_pos then
+        vim.api.nvim_buf_add_highlight(M.buf, -1, "Comment", idx, guide_pos - 1, guide_pos + 2)
+      end
+
+      -- 2. Colorer l'icône
+      -- La structure de la ligne est : "  [indent]icon name"
+      -- On cherche le premier caractère non-espace après l'éventuel guide d'indentation (│ fait 3 octets)
+      local search_start = (guide_pos and (guide_pos + 3) or 0) + 1
+      local icon_start_idx = line:find("[^ ]", search_start)
+      
+      if icon_start_idx then
+        -- L'icône se termine au premier espace qui suit
+        local icon_end_idx = line:find(" ", icon_start_idx)
         
-        -- Position du symbole git (s'il existe)
-        local git_end = content_start
-        if item.git_status then
-          git_end = content_start + 2  -- "✗ " fait 2 caractères
-        end
-        
-        -- Position de l'icône
-        local icon_start = git_end
-        local icon_end = line_text:find(" ", icon_start)
-        if not icon_end then icon_end = #line_text end
-        
-        -- Position du nom
-        local name_start = icon_end + 1
-        
-        -- Colorer le symbole git
-        if item.git_status then
-          local git_hl = {
-            M = "GitStatusModified",
-            A = "GitStatusAdded", 
-            ["?"] = "GitStatusUntracked",
-            D = "GitStatusDeleted"
-          }
-          vim.api.nvim_buf_add_highlight(M.buf, -1, git_hl[item.git_status], line_idx, content_start - 1, git_end)
-        end
-        
-        -- Colorer l'icône
-        if item.type == "directory" then
-          vim.api.nvim_buf_add_highlight(M.buf, -1, "IconDir", line_idx, icon_start - 1, icon_end)
-        else
-          local icon_data = ui.get_icon_data(item.path)
-          vim.api.nvim_buf_add_highlight(M.buf, -1, icon_data.hl, line_idx, icon_start - 1, icon_end)
-        end
-        
-        -- Colorer le nom selon git ET diagnostics
-        local name_hl = nil
-        
-        -- Vérifier les diagnostics pour les fichiers
-        if item.type ~= "directory" then
-          local diag_level = get_diagnostic_level(item.path)
-          if diag_level == "error" then
-            name_hl = "TreeFileError"
-          elseif diag_level == "warn" then
-            name_hl = "TreeFileWarn"
+        if icon_end_idx then
+          if item.type == "directory" then
+            vim.api.nvim_buf_add_highlight(M.buf, -1, "IconDir", idx, icon_start_idx - 1, icon_end_idx - 1)
+          else
+            local icon_data = ui.get_icon_data(item.path)
+            vim.api.nvim_buf_add_highlight(M.buf, -1, icon_data.hl, idx, icon_start_idx - 1, icon_end_idx - 1)
+          end
+
+          -- 3. Colorer le nom selon Git / Diagnostics (On commence après l'icône + espace)
+          local name_pos = line:find("[^ ]", icon_end_idx)
+          if name_pos then
+            local name_hl = item.type == "directory" and "Directory" or "Normal"
+            local diag = get_diagnostic_level(item.path)
+            if diag == "error" then name_hl = "DiagnosticError"
+            elseif diag == "warn" then name_hl = "DiagnosticWarn"
+            elseif item.git_status == "M" then name_hl = "DiffChange"
+            elseif item.git_status == "A" or item.git_status == "?" then name_hl = "DiffAdd"
+            elseif item.git_status == "D" then name_hl = "DiffDelete"
+            end
+            vim.api.nvim_buf_add_highlight(M.buf, -1, name_hl, idx, name_pos - 1, -1)
           end
         end
-        
-        -- Si pas de diagnostic, utiliser la couleur normale
-        if not name_hl then
-          name_hl = item.type == "directory" and "TreeDir" or "TreeFile"
-        end
-        
-        vim.api.nvim_buf_add_highlight(M.buf, -1, name_hl, line_idx, name_start - 1, -1)
       end
     end
   end
   
-  vim.api.nvim_buf_set_option(M.buf, "modifiable", false)
+  vim.bo[M.buf].modifiable = false
 end
 
 -- Exposer draw publiquement

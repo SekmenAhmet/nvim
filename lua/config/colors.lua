@@ -129,6 +129,7 @@ function M.setup()
   set("TabLine", { fg = c.comment, bg = c.bg_dark })
   set("TabLineSel", { fg = c.blue, bg = c.bg, bold = true })
   set("TabLineFill", { bg = c.bg_dark })
+  set("TabLineSeparator", { fg = c.fg_gutter, bg = c.bg_dark })
   
   -- Tabline with diagnostics
   set("TabLineError", { fg = c.red, bg = c.bg_dark, bold = true })

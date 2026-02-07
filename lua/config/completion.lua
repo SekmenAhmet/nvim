@@ -5,62 +5,63 @@ vim.opt.completeopt = "menu,menuone,noinsert,noselect"
 vim.opt.pumblend = 10
 vim.opt.pumheight = 10
 
--- Couleurs (Native, utilise le colorscheme actuel)
--- Pas besoin de redéfinir si le thème est bon, mais on assure la lisibilité
-vim.api.nvim_set_hl(0, "Pmenu", { link = "NormalFloat" })
-vim.api.nvim_set_hl(0, "PmenuSel", { link = "Visual" })
-
--- Auto-Trigger Logic (The "Native Autocomplete" trick)
--- Lance la complétion automatiquement après 2 caractères
+-- Auto-Trigger Logic (Intelligent Native Autocomplete)
 local function check_trigger()
-  -- Désactiver pour les buffers spéciaux (Finder, Grep, etc.)
-  if vim.bo.buftype == "nofile" or vim.bo.buftype == "prompt" then return end
-  local ft = vim.bo.filetype
-  if ft == "fzf_list" or ft == "grep_list" or ft == "TelescopePrompt" then return end
-
-  local col = vim.fn.col('.') - 1
-  if col < 2 then return end
+  if vim.bo.buftype ~= "" or vim.fn.pumvisible() ~= 0 then return end
   
+  local cursor = vim.api.nvim_win_get_cursor(0)
   local line = vim.api.nvim_get_current_line()
-  local char_before = line:sub(col, col)
+  local col = cursor[2]
+  local before = line:sub(1, col)
   
-  -- Ne pas déclencher si on vient de taper un espace ou un symbole
-  if char_before:match("%W") then return end
+  -- 1. Trigger sur les membres (obj.prop, obj->prop, class:meth)
+  local char_before = before:sub(-1)
+  local is_member = char_before:match("[%.:%-]") -- Déclenche sur . : - (pour ->)
   
-  -- Si le menu n'est pas visible, on lance <C-n>
-  if vim.fn.pumvisible() == 0 then
-    vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes("<C-n>", true, false, true), "n", false)
+  -- 2. Trigger sur les mots (min 2 chars)
+  local word_before = before:match("[%w_]+$") or ""
+  local is_word = #word_before >= 2
+
+  if is_member or is_word then
+    -- Priorité à l'Omnifunc (LSP) si disponible
+    local key = (vim.bo.omnifunc ~= "") and "<C-x><C-o>" or "<C-n>"
+    vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes(key, true, false, true), "n", false)
   end
 end
 
--- Debounce timer pour ne pas spammer <C-n> à chaque frappe
--- Timer réutilisable unique - créé une seule fois, pas de fuite mémoire
+-- Timer unique avec debounce
 local timer = vim.uv.new_timer()
 vim.api.nvim_create_autocmd("TextChangedI", {
   callback = function()
     timer:stop()
-    timer:start(100, 0, vim.schedule_wrap(check_trigger))
+    timer:start(150, 0, vim.schedule_wrap(check_trigger))
   end
 })
 
--- Mappings de navigation confortables
-local function map(lhs, rhs)
-  vim.keymap.set("i", lhs, rhs, { expr = true, silent = true })
-end
+-- Mappings de navigation (Optimisés pour Neovim 0.10+)
+vim.keymap.set("i", "<Tab>", function()
+  return vim.fn.pumvisible() == 1 and "<C-n>" or "<Tab>"
+end, { expr = true })
 
--- <Tab> pour descendre ou valider
-map("<Tab>", 'pumvisible() ? "<C-n>" : "<Tab>"')
-map("<S-Tab>", 'pumvisible() ? "<C-p>" : "<S-Tab>"')
-map("<CR>", 'pumvisible() ? "<C-y>" : "<CR>"')
+vim.keymap.set("i", "<S-Tab>", function()
+  return vim.fn.pumvisible() == 1 and "<C-p>" or "<S-Tab>"
+end, { expr = true })
 
--- Setup Lsp Attach
-vim.api.nvim_create_autocmd("LspAttach", {
-  callback = function(event)
-    local client = vim.lsp.get_client_by_id(event.data.client_id)
-    if client and client.server_capabilities.completionProvider then
-      vim.bo[event.buf].omnifunc = "v:lua.vim.lsp.omnifunc"
-    end
-  end,
-})
+vim.keymap.set("i", "<CR>", function()
+  return vim.fn.pumvisible() == 1 and "<C-y>" or "<CR>"
+end, { expr = true })
+
+-- Snippets Natifs (Neovim 0.10+) : Navigation dans les placeholders
+vim.keymap.set({ "i", "s" }, "<C-l>", function()
+  if vim.snippet.active({ direction = 1 }) then
+    vim.snippet.jump(1)
+  end
+end, { silent = true })
+
+vim.keymap.set({ "i", "s" }, "<C-h>", function()
+  if vim.snippet.active({ direction = -1 }) then
+    vim.snippet.jump(-1)
+  end
+end, { silent = true })
 
 return M

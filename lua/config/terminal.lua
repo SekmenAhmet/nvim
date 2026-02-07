@@ -11,11 +11,11 @@ function M.toggle()
     return
   end
 
-  -- Calculate dimensions
-  local width = math.floor(vim.o.columns * 0.85)
+  -- Calculate dimensions (80% of screen)
+  local width = math.floor(vim.o.columns * 0.8)
   local height = math.floor(vim.o.lines * 0.8)
   local row = math.floor((vim.o.lines - height) / 2)
-  local col = math.floor((vim.o.columns - width) / 2) + 1  -- +1 padding x
+  local col = math.floor((vim.o.columns - width) / 2)
 
   -- Create buffer if needed
   if terminal_buf == nil or not vim.api.nvim_buf_is_valid(terminal_buf) then
@@ -35,30 +35,17 @@ function M.toggle()
     title_pos = "center",
   })
 
-  -- Setup terminal if buffer is empty (newly created)
-  if vim.bo[terminal_buf].channel == 0 then
-    -- Determine shell based on OS
-    local shell = vim.o.shell
-    local is_windows = vim.uv.os_uname().version:find("Windows") or vim.fn.has("win32") == 1
-
-    if is_windows then
-      if vim.fn.executable("pwsh") == 1 then
-        shell = "pwsh"
-      elseif vim.fn.executable("powershell") == 1 then
-        shell = "powershell"
-      end
-    else
-      -- Linux/Unix: Prefer fish if available
-      if vim.fn.executable("fish") == 1 then
-        shell = "fish"
-      end
-    end
-
+  -- Setup terminal if buffer is empty
+  if vim.bo[terminal_buf].buftype ~= "terminal" then
+    local shell = vim.fn.executable("fish") == 1 and "fish" or vim.o.shell
     vim.fn.termopen(shell, {
       cwd = vim.fn.getcwd(),
       on_exit = function()
+        if terminal_win and vim.api.nvim_win_is_valid(terminal_win) then
+          vim.api.nvim_win_close(terminal_win, true)
+          terminal_win = nil
+        end
         terminal_buf = nil
-        terminal_win = nil
       end,
     })
   end
@@ -70,17 +57,18 @@ function M.toggle()
   -- Enter insert mode immediately
   vim.cmd("startinsert")
 
-  -- Keymaps for the terminal buffer
+  -- Mappings sécurisés
   local opts = { buffer = terminal_buf, silent = true }
-  -- Esc ferme directement depuis le mode terminal (plus pratique)
-  vim.keymap.set("t", "<Esc>", function()
-    vim.api.nvim_win_close(terminal_win, true)
-    terminal_win = nil
-  end, opts)
-  vim.keymap.set("t", "<C-t>", M.toggle, opts) 
-  vim.keymap.set("n", "<C-t>", M.toggle, opts)
-  vim.keymap.set("n", "q", M.toggle, opts)
-  vim.keymap.set("n", "<Esc>", M.toggle, opts) -- Allow closing with Esc in Normal mode
+  -- <C-t> pour fermer (Toggle symétrique)
+  vim.keymap.set("t", "<C-t>", M.toggle, opts)
+  -- <Leader><Esc> pour forcer la fermeture si besoin
+  vim.keymap.set("t", "<leader><Esc>", M.toggle, opts)
+  
+  -- Permettre la navigation standard entre fenêtres depuis le terminal
+  vim.keymap.set("t", "<C-h>", [[<C-\><C-n><C-w>h]], opts)
+  vim.keymap.set("t", "<C-j>", [[<C-\><C-n><C-w>j]], opts)
+  vim.keymap.set("t", "<C-k>", [[<C-\><C-n><C-w>k]], opts)
+  vim.keymap.set("t", "<C-l>", [[<C-\><C-n><C-w>l]], opts)
 end
 
 return M

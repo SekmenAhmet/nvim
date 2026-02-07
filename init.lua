@@ -41,7 +41,8 @@ vim.schedule(function()
   -- require("config.terminal")
   
   -- Still load these as they might have autocommands or setup
-  require("config.ui")
+  local ui_mod = require("config.ui")
+  ui_mod.setup()
   require("config.autocmds")
   
   -- Load new modules (illuminate, marks, multicursor have autocommands)

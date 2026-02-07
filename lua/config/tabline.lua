@@ -1,27 +1,27 @@
--- Tabline (Bufferline) Native
-
+-- Tabline (Bufferline) Native avec Icônes Colorées et Cache
+local ui = require("config.ui")
 local M = {}
 
--- Les couleurs sont définies dans config.colors
+-- Cache pour les diagnostics (performance)
+local diag_cache = {}
 
--- Obtenir le niveau de diagnostic d'un buffer
-local function get_buffer_diagnostic_level(bufnr)
-  local diagnostics = vim.diagnostic.get(bufnr)
-  local has_error = false
-  local has_warn = false
-  
-  for _, d in ipairs(diagnostics) do
-    if d.severity == vim.diagnostic.severity.ERROR then
-      has_error = true
-      break
-    elseif d.severity == vim.diagnostic.severity.WARN then
-      has_warn = true
+-- Mettre à jour le cache pour un buffer ou tous
+local function update_diag_cache(bufnr)
+  local function get_level(b)
+    local errs = #vim.diagnostic.get(b, { severity = vim.diagnostic.severity.ERROR })
+    if errs > 0 then return "error" end
+    local warns = #vim.diagnostic.get(b, { severity = vim.diagnostic.severity.WARN })
+    if warns > 0 then return "warn" end
+    return nil
+  end
+
+  if bufnr then
+    diag_cache[bufnr] = get_level(bufnr)
+  else
+    for _, b in ipairs(vim.api.nvim_list_bufs()) do
+      if vim.api.nvim_buf_is_valid(b) then diag_cache[b] = get_level(b) end
     end
   end
-  
-  if has_error then return "error" end
-  if has_warn then return "warn" end
-  return nil
 end
 
 function M.render()
@@ -29,16 +29,11 @@ function M.render()
   
   -- 1. Dynamic Sidebar Padding
   local sidebar_width = 0
-  local wins = vim.api.nvim_tabpage_list_wins(0)
-  for _, win in ipairs(wins) do
+  for _, win in ipairs(vim.api.nvim_tabpage_list_wins(0)) do
     local buf = vim.api.nvim_win_get_buf(win)
-    local ft = vim.bo[buf].filetype
-    if ft == "netrw" or ft == "tree" then
-       -- Vérifier que c'est bien la sidebar à gauche (col 0)
-       if vim.api.nvim_win_get_position(win)[2] == 0 then
-         sidebar_width = vim.api.nvim_win_get_width(win) + 1
-         break
-       end
+    if vim.bo[buf].filetype == "tree" and vim.api.nvim_win_get_position(win)[2] == 0 then
+      sidebar_width = vim.api.nvim_win_get_width(win) + 1
+      break
     end
   end
 
@@ -49,105 +44,75 @@ function M.render()
   local current_buf = vim.api.nvim_get_current_buf()
   local buffers = vim.api.nvim_list_bufs()
 
-  -- Check for single empty buffer to hide tabline
-  local listed_count = 0
-  local single_buf = nil
-  for _, buf in ipairs(buffers) do
-    if vim.bo[buf].buflisted then
-      listed_count = listed_count + 1
-      single_buf = buf
-    end
-  end
-  if listed_count == 1 and single_buf then
-    local name = vim.api.nvim_buf_get_name(single_buf)
-    if name == "" and not vim.bo[single_buf].modified then
-      return ""
-    end
-  end
-
-  -- Fond de remplissage au début
-  line = line .. "%#TabLineFill#"
-
-  for i, buf in ipairs(buffers) do
-    if vim.bo[buf].buflisted then
-      local is_current = (buf == current_buf)
-      local name = vim.api.nvim_buf_get_name(buf)
-      local modified = vim.bo[buf].modified and " ●" or ""
-      
-      -- FILTRAGE : Ignorer les buffers vides (No Name) sauf s'ils sont actifs ou modifiés
-      if name == "" and not is_current and not vim.bo[buf].modified then
-         goto continue
+  -- Rendu des buffers
+  local listed_buffers = {}
+  for _, b in ipairs(buffers) do
+    if vim.bo[b].buflisted then
+      local name = vim.api.nvim_buf_get_name(b)
+      if not (name == "" and b ~= current_buf and not vim.bo[b].modified) then
+        table.insert(listed_buffers, b)
       end
-      
-      -- Nettoyage du nom
-      if name == "" then
-        name = "Untitled"
-      else
-        name = vim.fn.fnamemodify(name, ":t")
-      end
-
-      -- Vérifier les diagnostics
-      local diag_level = get_buffer_diagnostic_level(buf)
-      
-      -- Clickable (Natif Neovim) - utilise le vrai buffer ID
-      line = line .. "%" .. buf .. "T"
-
-      -- Choisir le highlight selon l'état et les diagnostics
-      local hl_group
-      if is_current then
-        if diag_level == "error" then
-          hl_group = "TabLineSelError"
-        elseif diag_level == "warn" then
-          hl_group = "TabLineSelWarn"
-        else
-          hl_group = "TabLineSel"
-        end
-      else
-        if diag_level == "error" then
-          hl_group = "TabLineError"
-        elseif diag_level == "warn" then
-          hl_group = "TabLineWarn"
-        else
-          hl_group = "TabLine"
-        end
-      end
-
-      line = line .. "%#" .. hl_group .. "# " .. name .. modified .. " "
-      
-      -- Fin de la zone cliquable
-      line = line .. "%T"
-      
-      -- Séparateur
-      line = line .. "%#TabLineFill#│"
-      
-      ::continue::
     end
   end
 
-  -- Remplissage du reste de la ligne
-  line = line .. "%#TabLineFill#%="
-  
-  -- Indicateur à droite - compteur de buffers
-  local buf_count = 0
-  for _, buf in ipairs(buffers) do
-    if vim.bo[buf].buflisted then
-      buf_count = buf_count + 1
+  for i, buf in ipairs(listed_buffers) do
+    local is_current = (buf == current_buf)
+    local name = vim.api.nvim_buf_get_name(buf)
+    local modified = vim.bo[buf].modified and " ●" or ""
+    
+    name = (name == "") and "Untitled" or vim.fn.fnamemodify(name, ":t")
+    local diag_level = diag_cache[buf]
+    local icon_data = ui.get_icon_data(name)
+
+    -- Clickable
+    line = line .. "%" .. buf .. "T"
+
+    -- Highlight Group selection (Fond de l'onglet)
+    local hl_tab_bg = is_current and "TabLineSel" or "TabLine"
+    if diag_level == "error" then hl_tab_bg = is_current and "TabLineSelError" or "TabLineError"
+    elseif diag_level == "warn" then hl_tab_bg = is_current and "TabLineSelWarn" or "TabLineWarn"
+    end
+
+    -- Début de l'onglet
+    line = line .. "%#" .. hl_tab_bg .. "# "
+    
+    -- ICONE COLORÉE : On passe au highlight de l'icône, puis on revient au fond de l'onglet
+    line = line .. "%#" .. icon_data.hl .. "#" .. icon_data.icon .. "%#" .. hl_tab_bg .. "# "
+    
+    -- Nom du fichier + Modifié
+    line = line .. name .. modified .. " "
+    
+    line = line .. "%T"
+    
+    -- Separator (if not last)
+    if i < #listed_buffers then
+      line = line .. "%#TabLineSeparator#|%#TabLineFill#"
+    else
+      line = line .. "%#TabLineFill# "
     end
   end
-  line = line .. "%#TabLine#%999X  " .. buf_count .. " "
 
+  line = line .. "%=%#TabLine#  " .. #vim.tbl_filter(function(b) return vim.bo[b].buflisted end, buffers) .. " "
   return line
 end
 
--- Activer la tabline
-vim.opt.showtabline = 2 -- Toujours afficher
-vim.opt.tabline = "%!luaeval('require(\"config.tabline\").render()')"
-
--- Rafraîchir la tabline quand on ferme ou change de buffer
-vim.api.nvim_create_autocmd({ "BufAdd", "BufDelete", "BufEnter" }, {
-  callback = function()
+-- Autocommandes pour le cache et le refresh
+vim.api.nvim_create_autocmd("DiagnosticChanged", {
+  callback = function(args)
+    update_diag_cache(args.buf)
     vim.cmd("redrawtabline")
   end,
 })
+
+vim.api.nvim_create_autocmd({ "BufAdd", "BufDelete", "BufEnter" }, {
+  callback = function()
+    update_diag_cache()
+    vim.cmd("redrawtabline")
+  end,
+})
+
+-- Activer la tabline
+vim.opt.showtabline = 2
+vim.opt.tabline = "%!luaeval('require(\"config.tabline\").render()')"
 
 return M

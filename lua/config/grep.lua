@@ -27,6 +27,7 @@ local state = {
   timer_preview = vim.uv.new_timer(),  -- Timer réutilisable unique
   last_query = "",
   last_preview_key = nil,
+  preview_cache = {}, -- Simple cache for file previews
 }
 
 -- Ignore patterns
@@ -61,6 +62,22 @@ local function update_preview(filename, lnum)
   local key = filename .. ":" .. lnum
   if state.last_preview_key == key then return end
   state.last_preview_key = key
+
+  -- 1. Check Cache first
+  if state.preview_cache[key] then
+    local cached = state.preview_cache[key]
+    vim.schedule(function()
+      if not vim.api.nvim_buf_is_valid(state.buf_preview) then return end
+      vim.api.nvim_buf_set_lines(state.buf_preview, 0, -1, false, cached.lines)
+      if cached.ft then vim.bo[state.buf_preview].filetype = cached.ft end
+      pcall(vim.api.nvim_win_set_cursor, state.win_preview, {cached.relative_lnum, 0})
+      vim.api.nvim_win_call(state.win_preview, function() vim.cmd("normal! zz") end)
+      local ns = vim.api.nvim_create_namespace("grep_preview")
+      vim.api.nvim_buf_clear_namespace(state.buf_preview, ns, 0, -1)
+      vim.api.nvim_buf_add_highlight(state.buf_preview, ns, "Search", cached.relative_lnum - 1, 0, -1)
+    end)
+    return
+  end
 
   state.timer_preview:stop()
   state.timer_preview:start(5, 0, vim.schedule_wrap(function()
@@ -116,20 +133,13 @@ local function update_preview(filename, lnum)
         vim.schedule(function()
           if not vim.api.nvim_buf_is_valid(state.buf_preview) then return end
           local lines = vim.split(data or "", "\n")
-          vim.api.nvim_buf_set_lines(state.buf_preview, 0, -1, false, lines)
-
-          local ft = vim.filetype.match({ filename = filename })
-          if ft then vim.bo[state.buf_preview].filetype = ft end
-
+          
           -- Calculer la ligne relative dans le contexte lu
           local relative_lnum = lnum
           if is_truncated then
-            -- Si on a lu un offset, trouver où est la ligne cible
             relative_lnum = math.min(context_lines + 1, #lines)
-            -- Chercher la ligne contenant le numéro (approximatif)
             for i, line in ipairs(lines) do
               if i > 1 and i < #lines then
-                -- Heuristique : si on trouve un pattern similaire
                 if i >= context_lines - 5 and i <= context_lines + 5 then
                   relative_lnum = i
                   break
@@ -137,9 +147,20 @@ local function update_preview(filename, lnum)
               end
             end
           end
-          
           relative_lnum = math.max(1, math.min(relative_lnum, #lines))
           
+          local ft = vim.filetype.match({ filename = filename })
+          
+          -- Save to Cache
+          state.preview_cache[key] = {
+            lines = lines,
+            ft = ft,
+            relative_lnum = relative_lnum
+          }
+
+          vim.api.nvim_buf_set_lines(state.buf_preview, 0, -1, false, lines)
+          if ft then vim.bo[state.buf_preview].filetype = ft end
+
           pcall(vim.api.nvim_win_set_cursor, state.win_preview, {relative_lnum, 0})
           vim.api.nvim_win_call(state.win_preview, function() vim.cmd("normal! zz") end)
 
