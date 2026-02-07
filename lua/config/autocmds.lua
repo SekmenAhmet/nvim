@@ -1,21 +1,32 @@
 -- Autocommandes
 
--- 1. Trim trailing whitespace on save
+-- 1. Trim trailing whitespace on save (Native Lua API)
 vim.api.nvim_create_autocmd("BufWritePre", {
   pattern = "*",
-  callback = function()
-    -- Save cursor view to restore it later
-    local view = vim.fn.winsaveview()
-    -- Native efficient substitution: silent (no msg), keep patterns (no search history), e flag (no error if not found)
-    vim.cmd([[silent! keeppatterns %s/\s\+$//e]])
-    vim.fn.winrestview(view)
+  callback = function(args)
+    local buf = args.buf
+    local lines = vim.api.nvim_buf_get_lines(buf, 0, -1, false)
+    local modified = false
+    
+    for i, line in ipairs(lines) do
+      local trimmed = line:gsub("%s+$", "")
+      if trimmed ~= line then
+        lines[i] = trimmed
+        modified = true
+      end
+    end
+    
+    if modified then
+      vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
+    end
   end,
   desc = "Remove trailing whitespace on save",
 })
 
 -- 2. Highlight on Yank (Flasher le texte copié)
+local highlight_yank_group = vim.api.nvim_create_augroup("HighlightYank", { clear = true })
 vim.api.nvim_create_autocmd("TextYankPost", {
-  group = vim.api.nvim_create_augroup("HighlightYank", { clear = true }),
+  group = highlight_yank_group,
   callback = function()
     vim.highlight.on_yank({
       higroup = "IncSearch", -- Couleur du flash (souvent inversé)
@@ -39,29 +50,15 @@ vim.api.nvim_create_autocmd("BufReadPost", {
   desc = "Restore cursor position on file open",
 })
 
--- 4. Auto-open single file in directory
-vim.api.nvim_create_autocmd("VimEnter", {
+-- 4. Terminal mode improvements
+vim.api.nvim_create_autocmd("TermOpen", {
+  pattern = "*",
   callback = function()
-    -- Only run if no arguments were passed (opening directory)
-    if vim.fn.argc() == 0 then
-      local cwd = vim.uv.cwd()
-      local handle = vim.uv.fs_scandir(cwd)
-      local files = {}
-      if handle then
-        while true do
-          local name, type = vim.uv.fs_scandir_next(handle)
-          if not name then break end
-          if not name:match("^%.") then
-            table.insert(files, {name=name, type=type})
-          end
-        end
-      end
-      
-      if #files == 1 and files[1].type == "file" then
-        vim.cmd("edit " .. files[1].name)
-      end
-    end
+    vim.opt_local.number = false
+    vim.opt_local.relativenumber = false
+    vim.opt_local.signcolumn = "no"
+    vim.cmd("startinsert")
   end,
-  desc = "Auto open single file",
+  desc = "Terminal UI settings",
 })
   

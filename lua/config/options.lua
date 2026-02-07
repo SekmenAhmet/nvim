@@ -31,3 +31,15 @@ vim.opt.undofile = true
 vim.opt.list = true
 -- Ensure no dots for leading spaces ("lead" defaults to Space if not set, but let's be explicit)
 vim.opt.listchars = { trail = "·", nbsp = "␣", tab = "  ", lead = " " }
+
+-- LSP hover diagnostics delay
+vim.opt.updatetime = 500
+
+-- UI optimizations
+vim.opt.shortmess:append("I") -- Disable intro screen
+vim.opt.fillchars = {
+  eob = " ",     -- Hide end-of-buffer tildes
+  fold = " ",    -- Fold character
+  diff = "╱",    -- Diff separator
+  vert = "│",    -- Vertical split
+}

@@ -1,9 +1,6 @@
 -- Native UI Overrides & Icon Provider
 local M = {}
 
--- apply overrides
-vim.ui.select = M.select -- Defined below (placeholder, referenced from previous logic)
-
 -- Icon Configuration (Icon + Hex Color)
 local icons_config = {
   -- Languages & Extensions
@@ -40,7 +37,6 @@ local icons_config = {
   Dockerfile = { icon = "", color = "#384d54" },
   dockerignore = { icon = "", color = "#384d54" },
   sql  = { icon = "", color = "#dadada" },
-  rb   = { icon = "", color = "#701516" },
   rake = { icon = "", color = "#701516" },
   swift = { icon = "", color = "#e37933" },
   lock = { icon = "", color = "#bbbbbb" },
@@ -89,22 +85,42 @@ function M.setup()
   vim.api.nvim_set_hl(0, "IconDirOpen", { fg = "#9ece6a" }) -- Open Folder color (Greenish)
 end
 
+-- Simple LRU cache for icon lookups
+local icon_cache = {}
+local cache_size = 0
+local max_cache_size = 100
+
 -- Return { icon = "...", hl = "Icon..." }
 function M.get_icon_data(filename)
+  -- Check cache first
+  if icon_cache[filename] then
+    return icon_cache[filename]
+  end
+  
   local name = vim.fn.fnamemodify(filename, ":t")
   local ext = name:match("^.+%.(.+)$")
+  local result
   
   -- Exact match first
   if icons_config[name] then
-    return { icon = icons_config[name].icon, hl = "Icon" .. name:gsub("%.", "") }
-  end
-  
+    result = { icon = icons_config[name].icon, hl = "Icon" .. name:gsub("%.", "") }
   -- Extension match
-  if ext and icons_config[ext:lower()] then
-    return { icon = icons_config[ext:lower()].icon, hl = "Icon" .. ext:lower():gsub("%.", "") }
+  elseif ext and icons_config[ext:lower()] then
+    result = { icon = icons_config[ext:lower()].icon, hl = "Icon" .. ext:lower():gsub("%.", "") }
+  else
+    result = { icon = "", hl = "IconDefault" }
   end
   
-  return { icon = "", hl = "IconDefault" }
+  -- Simple cache eviction (FIFO)
+  if cache_size >= max_cache_size then
+    icon_cache = {}
+    cache_size = 0
+  end
+  
+  icon_cache[filename] = result
+  cache_size = cache_size + 1
+  
+  return result
 end
 
 -- UI Helpers (Select/Input) - kept from previous version
@@ -125,7 +141,7 @@ local function create_win(width, height, title)
     style = "minimal",
     border = "rounded",
     title = title and (" " .. title .. " ") or nil,
-    title_pos = "center",
+    title_pos = "left",
   })
 
   vim.wo[win].winhl = "NormalFloat:NormalFloat,FloatBorder:FloatBorder,CursorLine:Visual"
@@ -198,7 +214,6 @@ vim.ui.input = M.input
 
 -- Open in normal win
 function M.open_in_normal_win(file, lnum)
-  -- Logic identical to previous, just re-declaring for completeness
   local curr_win = vim.api.nvim_get_current_win()
   local cur_buf = vim.api.nvim_get_current_buf()
   local ft = vim.bo[cur_buf].filetype
@@ -236,5 +251,9 @@ function M.open_in_normal_win(file, lnum)
     vim.cmd("normal! zz")
   end
 end
+
+-- Apply UI overrides
+vim.ui.select = M.select
+vim.ui.input = M.input
 
 return M

@@ -169,8 +169,6 @@ function M.setup()
   set("PmenuSel", { bg = c.bg_visual, fg = "NONE", bold = true })
   set("PmenuThumb", { bg = c.fg_gutter })
 
-  -- Register UI Icon Highlights
-  require("config.ui").setup()
 end
 
 return M

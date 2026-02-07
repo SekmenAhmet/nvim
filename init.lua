@@ -30,16 +30,9 @@ require("config.keymaps") -- Keymaps now handle lazy loading triggers
 require("config.moves")
 require("config.statusline")
 require("config.tabline")
--- require("config.highlights") -- Remplacé par Treesitter
 
 -- Defer non-critical modules to unblock UI painting
 vim.schedule(function()
-  -- These are now loaded lazily via keymaps in config.keymaps
-  -- require("config.netrw") 
-  -- require("config.finder")
-  -- require("config.grep")
-  -- require("config.terminal")
-  
   -- Still load these as they might have autocommands or setup
   local ui_mod = require("config.ui")
   ui_mod.setup()

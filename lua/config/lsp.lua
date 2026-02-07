@@ -7,16 +7,16 @@ function M.on_attach(client, bufnr)
   vim.keymap.set("n", "K", vim.lsp.buf.hover, opts)
   vim.keymap.set("n", "<leader>rn", vim.lsp.buf.rename, opts)
   vim.keymap.set("n", "<leader>ca", vim.lsp.buf.code_action, opts)
-  
+
   -- Native Completion
   if client.server_capabilities.completionProvider then
     vim.bo[bufnr].omnifunc = "v:lua.vim.lsp.omnifunc"
   end
 
-  -- Auto-format on save
+  -- Auto-format on save (using global augroup for efficiency)
   if client.server_capabilities.documentFormattingProvider then
     vim.api.nvim_create_autocmd("BufWritePre", {
-      group = vim.api.nvim_create_augroup("LspFormat." .. bufnr, { clear = true }),
+      group = lsp_format_augroup,
       buffer = bufnr,
       callback = function()
         vim.lsp.buf.format({ bufnr = bufnr, async = false })
@@ -58,25 +58,17 @@ vim.diagnostic.config({
   },
 })
 
--- Hover diagnostics automatique après 500ms
-vim.opt.updatetime = 500
+-- Single augroup for all LSP formatting (optimization)
+local lsp_format_augroup = vim.api.nvim_create_augroup("LspFormatting", { clear = true })
 
+-- Hover diagnostics automatique après updatetime (configuré dans diagnostic.config.float ci-dessus)
 vim.api.nvim_create_autocmd("CursorHold", {
   callback = function()
-    -- Ne pas afficher si on est en mode insert
+    -- Skip if in insert mode
     if vim.api.nvim_get_mode().mode:match("^i") then
       return
     end
-    
-    -- API Native optimisée : ne s'ouvre que si un diagnostic est sous le curseur
-    vim.diagnostic.open_float(nil, {
-      focusable = false,
-      close_events = { "BufLeave", "CursorMoved", "InsertEnter", "FocusLost" },
-      border = "rounded",
-      source = "if_many",
-      prefix = "",
-      scope = "cursor",
-    })
+    vim.diagnostic.open_float(nil, { scope = "cursor" })
   end,
 })
 

@@ -338,10 +338,11 @@ function DB.init()
       State.tree = {}
     end
   else
-    -- New file init
+    -- File doesn't exist yet - don't create it, just init empty state
     State.tree = {}
     State.yaml_header = { "openapi: 3.0.0", "info:", "  title: API", "  version: 1.0.0", "paths:" }
     State.yaml_footer = {}
+    -- Don't create the file yet - will be created on first route creation
   end
   
   DB.flat()
@@ -422,16 +423,21 @@ function DB.find(id, list)
 end
 
 function DB.add(list, name)
+  -- Create file on first route creation if it doesn't exist
+  if not vim.uv.fs_stat(State.file_path) then
+    DB.save(true) -- silent save to create file
+  end
+
   local is_folder = name:sub(-1) == "/"
   local clean_name = is_folder and name:sub(1, -2) or name
-  
-  local n = { 
-    id = U.uuid(), 
-    name = clean_name, 
-    type = is_folder and "folder" or "request", 
+
+  local n = {
+    id = U.uuid(),
+    name = clean_name,
+    type = is_folder and "folder" or "request",
     expanded = true
   }
-  
+
   if is_folder then
     n.children = {}
   else
@@ -533,7 +539,7 @@ function UI.layout()
   local mw, ew = W-sw, math.floor((W-sw)/2); local rw = mw-ew; local mh = math.floor(H*Config.ui.meta_pct)
   local function win(k, b, r, c, w, h, t)
     if w<=1 then if State.wins[k] and api.nvim_win_is_valid(State.wins[k]) then api.nvim_win_close(State.wins[k], true) end State.wins[k]=nil return end
-    local cfg = { relative="editor", row=r, col=c, width=w-2, height=h-2, style="minimal", border="rounded", title=" "..t.." ", title_pos="center" }
+    local cfg = { relative="editor", row=r, col=c, width=w-2, height=h-2, style="minimal", border="rounded", title=" "..t.." ", title_pos="left" }
     if State.wins[k] and api.nvim_win_is_valid(State.wins[k]) then api.nvim_win_set_config(State.wins[k], cfg)
     else State.wins[k] = api.nvim_open_win(b, false, cfg); vim.wo[State.wins[k]].winhl = "NormalFloat:NormalFloat,FloatBorder:"..Config.hl.border end
   end
@@ -558,7 +564,13 @@ end
 local App = {}
 M.App = App
 App.refresh = U.debounce(200, function() if State.req_id and api.nvim_buf_is_valid(State.bufs.meta or -1) then local n = DB.find(State.req_id); if n then n.meta = api.nvim_buf_get_lines(State.bufs.meta, 0, -1, false); UI.draw_side() end end end)
-App.autosave = U.debounce(1000, function() App.sync(); DB.save(true) end)
+App.autosave = U.debounce(1000, function() 
+  App.sync()
+  -- Only save if file exists or if there are routes in the tree
+  if vim.uv.fs_stat(State.file_path) or #State.tree > 0 then
+    DB.save(true)
+  end
+end)
 
 function App.sync()
   if not State.req_id then return end

@@ -418,6 +418,13 @@ function M.open()
   })
 
   local function close()
+    -- Stop timers
+    if state.timer_debounce then
+      state.timer_debounce:stop()
+    end
+    if state.timer_preview then
+      state.timer_preview:stop()
+    end
     window.close_windows(state)
   end
 

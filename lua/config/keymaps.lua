@@ -4,12 +4,6 @@ vim.keymap.set("n", "<C-j>", "<C-w>j", { silent = true, desc = "Go to window bel
 vim.keymap.set("n", "<C-k>", "<C-w>k", { silent = true, desc = "Go to window above" })
 vim.keymap.set("n", "<C-l>", "<C-w>l", { silent = true, desc = "Go to right window" })
 
--- Terminal mode navigation
-vim.keymap.set("t", "<C-h>", [[<C-\><C-n><C-w>h]], { silent = true, desc = "Go to left window" })
-vim.keymap.set("t", "<C-j>", [[<C-\><C-n><C-w>j]], { silent = true, desc = "Go to window below" })
-vim.keymap.set("t", "<C-k>", [[<C-\><C-n><C-w>k]], { silent = true, desc = "Go to window above" })
-vim.keymap.set("t", "<C-l>", [[<C-\><C-n><C-w>l]], { silent = true, desc = "Go to right window" })
-
 -- Resize du tree avec Ctrl+Alt+flèches (Inversé)
 vim.keymap.set("n", "<C-M-Left>", "<cmd>vertical resize +2<CR>", { silent = true, desc = "Increase window width" })
 vim.keymap.set("n", "<C-M-Right>", "<cmd>vertical resize -2<CR>", { silent = true, desc = "Decrease window width" })
@@ -107,3 +101,6 @@ vim.keymap.set({"n", "i", "t"}, "<C-t>", toggle_term, { desc = "Toggle terminal"
 -- Netrw Tree (Ctrl+b)
 local function toggle_netrw() require("config.netrw").toggle() end
 vim.keymap.set({"n", "i", "v"}, "<C-b>", toggle_netrw, { silent = true, desc = "Toggle file tree" })
+
+-- Git Dashboard (Ctrl+g)
+vim.keymap.set({"n", "i", "t"}, "<C-g>", function() require("config.git").toggle() end, { desc = "Toggle Git Dashboard" })

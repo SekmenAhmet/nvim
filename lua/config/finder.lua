@@ -29,17 +29,6 @@ local state = {
   last_preview_file = nil,
 }
 
--- Ignore list for 'find' fallback
-local ignore_list = {
-  "-not -path '*/.*'",
-  "-not -path '*/node_modules/*'",
-  "-not -path '*/target/*'",
-  "-not -path '*/build/*'",
-  "-not -path '*/dist/*'",
-  "-not -path '*/__pycache__/*'",
-  "-not -path '*/venv/*'",
-}
-
 -- Smart Fuzzy Scoring Algorithm
 -- "uc" matches "user_controller", "conf" matches "my_config"
 local function score_file(file, query_lower)
@@ -384,6 +373,10 @@ function M.open()
 
   -- Actions
   local function close()
+    -- Stop preview timer
+    if state.preview_timer then
+      state.preview_timer:stop()
+    end
     window.close_windows(state)
     -- WinClosed autocommand handles the rest
   end

@@ -44,12 +44,13 @@ function M.render()
   local current_buf = vim.api.nvim_get_current_buf()
   local buffers = vim.api.nvim_list_bufs()
 
-  -- Rendu des buffers
+  -- Rendu des buffers (skip unnamed buffers)
   local listed_buffers = {}
   for _, b in ipairs(buffers) do
     if vim.bo[b].buflisted then
       local name = vim.api.nvim_buf_get_name(b)
-      if not (name == "" and b ~= current_buf and not vim.bo[b].modified) then
+      -- Skip unnamed buffers (Untitled) entirely
+      if name ~= "" then
         table.insert(listed_buffers, b)
       end
     end
@@ -92,7 +93,7 @@ function M.render()
     end
   end
 
-  line = line .. "%=%#TabLine#  " .. #vim.tbl_filter(function(b) return vim.bo[b].buflisted end, buffers) .. " "
+  line = line .. "%=%#TabLine#  " .. #listed_buffers .. " "
   return line
 end
 

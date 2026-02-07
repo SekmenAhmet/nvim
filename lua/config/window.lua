@@ -169,7 +169,7 @@ function M.create_centered(opts)
     style = "minimal",
     border = "rounded",
     title = title ~= "" and (" " .. title .. " ") or nil,
-    title_pos = "center",
+    title_pos = "left",
   })
 
   vim.wo[win].winhl = "NormalFloat:NormalFloat,FloatBorder:FloatBorder,CursorLine:Visual"

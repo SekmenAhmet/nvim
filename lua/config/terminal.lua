@@ -32,13 +32,14 @@ function M.toggle()
     style = "minimal",
     border = "rounded",
     title = " Terminal ",
-    title_pos = "center",
+    title_pos = "left",
   })
 
-  -- Setup terminal if buffer is empty
+  -- Setup terminal if buffer is empty (using jobstart with 'term' option - modern API)
   if vim.bo[terminal_buf].buftype ~= "terminal" then
     local shell = vim.fn.executable("fish") == 1 and "fish" or vim.o.shell
-    vim.fn.termopen(shell, {
+    vim.fn.jobstart({ shell }, {
+      term = true,
       cwd = vim.fn.getcwd(),
       on_exit = function()
         if terminal_win and vim.api.nvim_win_is_valid(terminal_win) then
@@ -53,7 +54,7 @@ function M.toggle()
   -- Window options
   vim.wo[terminal_win].number = false
   vim.wo[terminal_win].relativenumber = false
-  
+
   -- Enter insert mode immediately
   vim.cmd("startinsert")
 
@@ -63,7 +64,7 @@ function M.toggle()
   vim.keymap.set("t", "<C-t>", M.toggle, opts)
   -- <Leader><Esc> pour forcer la fermeture si besoin
   vim.keymap.set("t", "<leader><Esc>", M.toggle, opts)
-  
+
   -- Permettre la navigation standard entre fenêtres depuis le terminal
   vim.keymap.set("t", "<C-h>", [[<C-\><C-n><C-w>h]], opts)
   vim.keymap.set("t", "<C-j>", [[<C-\><C-n><C-w>j]], opts)

@@ -38,6 +38,16 @@ vim.api.nvim_create_autocmd("TextChangedI", {
   end
 })
 
+-- Cleanup timer on VimLeave
+vim.api.nvim_create_autocmd("VimLeave", {
+  callback = function()
+    if timer then
+      timer:stop()
+      timer:close()
+    end
+  end,
+})
+
 -- Mappings de navigation (Optimisés pour Neovim 0.10+)
 vim.keymap.set("i", "<Tab>", function()
   return vim.fn.pumvisible() == 1 and "<C-n>" or "<Tab>"

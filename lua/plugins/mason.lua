@@ -26,5 +26,5 @@ return {
       })
     end
   },
-  { "neovim/nvim-lspconfig", lazy = true }
+  { "neovim/nvim-lspconfig" }
 }
