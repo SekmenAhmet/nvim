@@ -1,13 +1,11 @@
 -- Options générales
 vim.g.mapleader = " "
 
--- Detect OS and set Shell
-if vim.uv.os_uname().sysname == "Windows_NT" then
-  vim.opt.shell = "powershell"
-else
-  -- Linux/Mac
-  vim.opt.shell = "fish"
-end
+-- Detect OS and set Shell (cached for performance)
+vim.g._shell_cache = vim.g._shell_cache or (
+  vim.uv.os_uname().sysname == "Windows_NT" and "powershell" or "fish"
+)
+vim.opt.shell = vim.g._shell_cache
 
 vim.opt.number = true
 vim.opt.relativenumber = true

@@ -1,74 +1,16 @@
 -- UI Window Component Library (Standardized)
 -- Provides reusable window management utilities
+-- Uses utils module for core functionality
 -- Used by: finder.lua, grep.lua, search.lua, cmdline.lua, terminal.lua
 
 local M = {}
 local api = vim.api
+local utils = require("utils")
 
 -- Create a centered dual-pane window (list + preview)
 -- Returns: { buf_list, win_list, buf_preview, win_preview }
 function M.create_dual_pane(opts)
-  opts = opts or {}
-  local width_pct = opts.width_pct or 0.7
-  local height_pct = opts.height_pct or 0.8
-  local preview_width_pct = opts.preview_width_pct or 0.6
-  local list_title = opts.list_title or " List "
-  local preview_title = opts.preview_title or " Preview "
-  local list_filetype = opts.list_filetype
-  local preview_filetype = opts.preview_filetype
-
-  local total_width = math.floor(vim.o.columns * width_pct)
-  local total_height = math.floor(vim.o.lines * height_pct)
-  local row = math.floor((vim.o.lines - total_height) / 2)
-  local col = math.floor((vim.o.columns - total_width) / 2)
-  local preview_width = math.floor(total_width * preview_width_pct)
-  local list_width = total_width - preview_width - 2
-
-  -- Create buffers
-  local buf_list = api.nvim_create_buf(false, true)
-  local buf_preview = api.nvim_create_buf(false, true)
-
-  -- Set filetypes if provided
-  if list_filetype then
-    vim.bo[buf_list].filetype = list_filetype
-  end
-  if preview_filetype then
-    vim.bo[buf_preview].filetype = preview_filetype
-  end
-
-  -- Create windows
-  local win_list = api.nvim_open_win(buf_list, true, {
-    relative = "editor",
-    width = list_width,
-    height = total_height,
-    row = row,
-    col = col,
-    style = "minimal",
-    border = "rounded",
-    title = " " .. list_title .. " ",
-  })
-
-  local win_preview = api.nvim_open_win(buf_preview, false, {
-    relative = "editor",
-    width = preview_width,
-    height = total_height,
-    row = row,
-    col = col + list_width + 2,
-    style = "minimal",
-    border = "rounded",
-    title = " " .. preview_title .. " ",
-  })
-
-  -- Apply common styling
-  M.apply_list_styling(win_list, buf_list)
-  M.apply_preview_styling(win_preview, buf_preview)
-
-  return {
-    buf_list = buf_list,
-    win_list = win_list,
-    buf_preview = buf_preview,
-    win_preview = win_preview,
-  }
+  return utils.create_dual_pane(opts)
 end
 
 -- Apply standard styling to list window
@@ -141,41 +83,7 @@ end
 
 -- Create a simple centered floating window
 function M.create_centered(opts)
-  opts = opts or {}
-  local width_pct = opts.width_pct or 0.25
-  local height = opts.height
-  local height_pct = opts.height_pct
-  local title = opts.title or ""
-  local row_offset = opts.row_offset or 2
-
-  -- Calculate height
-  if not height and height_pct then
-    height = math.floor(vim.o.lines * height_pct)
-  elseif not height then
-    height = 1
-  end
-
-  local width = math.floor(vim.o.columns * width_pct)
-  local col = math.floor((vim.o.columns - width) / 2)
-  local row = row_offset
-
-  local buf = api.nvim_create_buf(false, true)
-  local win = api.nvim_open_win(buf, true, {
-    relative = "editor",
-    width = width,
-    height = height,
-    row = row,
-    col = col,
-    style = "minimal",
-    border = "rounded",
-    title = title ~= "" and (" " .. title .. " ") or nil,
-    title_pos = "left",
-  })
-
-  vim.wo[win].winhl = "NormalFloat:NormalFloat,FloatBorder:FloatBorder,CursorLine:Visual"
-  vim.bo[buf].buftype = "nofile"
-
-  return { buf = buf, win = win }
+  return utils.create_centered_win(opts)
 end
 
 return M

@@ -252,8 +252,4 @@ function M.open_in_normal_win(file, lnum)
   end
 end
 
--- Apply UI overrides
-vim.ui.select = M.select
-vim.ui.input = M.input
-
 return M

@@ -1,4 +1,3 @@
-local colors = require("config.colors")
 local ui = require("config.ui")
 
 local M = {}

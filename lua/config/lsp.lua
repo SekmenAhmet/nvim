@@ -1,5 +1,8 @@
 local M = {}
 
+-- Single augroup for all LSP formatting (optimization) - DEFINED FIRST
+local lsp_format_augroup = vim.api.nvim_create_augroup("LspFormatting", { clear = true })
+
 function M.on_attach(client, bufnr)
   -- Keymaps
   local opts = { buffer = bufnr, silent = true }
@@ -58,11 +61,12 @@ vim.diagnostic.config({
   },
 })
 
--- Single augroup for all LSP formatting (optimization)
-local lsp_format_augroup = vim.api.nvim_create_augroup("LspFormatting", { clear = true })
+-- Augroup pour tous les autocmds LSP globaux
+local lsp_global_augroup = vim.api.nvim_create_augroup("LspGlobal", { clear = true })
 
 -- Hover diagnostics automatique après updatetime (configuré dans diagnostic.config.float ci-dessus)
 vim.api.nvim_create_autocmd("CursorHold", {
+  group = lsp_global_augroup,
   callback = function()
     -- Skip if in insert mode
     if vim.api.nvim_get_mode().mode:match("^i") then
@@ -74,6 +78,7 @@ vim.api.nvim_create_autocmd("CursorHold", {
 
 -- Rafraîchir la tabline quand les diagnostics changent
 vim.api.nvim_create_autocmd("DiagnosticChanged", {
+  group = lsp_global_augroup,
   callback = function()
     vim.cmd("redrawtabline")
   end,
