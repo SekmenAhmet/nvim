@@ -315,7 +315,21 @@ local function update_preview()
   if pane == "files" then
     local file = state.files[cursor]
     if not file then return set_buf(buf, {""}) end
-    if file.type == "untracked" then
+    
+    if file.type == "deleted" then
+      -- Show file content before deletion
+      local args = { "show", "HEAD:" .. file.path }
+      git(args, function(out)
+        if out and out:match("%S") then
+          set_buf(buf, vim.split(out, "\n"))
+          vim.bo[buf].filetype = vim.filetype.match({ filename = file.path }) or ""
+        else
+          set_buf(buf, { " [Deleted file - no content available] " })
+        end
+      end, function()
+        set_buf(buf, { " [Deleted file] " })
+      end)
+    elseif file.type == "untracked" then
       if vim.fn.filereadable(file.path) == 1 then
         local content = vim.fn.readfile(file.path)
         set_buf(buf, content)
