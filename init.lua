@@ -12,7 +12,7 @@ local builtins = {
   "netrw", "netrwPlugin", "netrwSettings", "netrwFileHandlers",
   "gzip", "zip", "zipPlugin", "tar", "tarPlugin",
   "getscript", "getscriptPlugin", "vimball", "vimballPlugin",
-  "2html_plugin", "logipat", "rrhelper", "spellfileplugin", "matchit"
+  "2html_plugin", "logipat", "rrhelper", "spellfileplugin"
 }
 
 for _, plugin in ipairs(builtins) do

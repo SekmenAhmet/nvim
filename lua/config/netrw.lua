@@ -187,7 +187,7 @@ draw_impl = function()
       if item.type == "directory" then
         icon = M.expanded[item.path] and " " or " "
       else
-        icon = ui.get_icon(item.name) .. " "
+        icon = ui.get_icon_data(item.name).icon .. " "
       end
       
       -- Ajouter le symbole git avant l'icône
@@ -303,7 +303,7 @@ function M.toggle()
   
   if not M.buf or not vim.api.nvim_buf_is_valid(M.buf) then
     M.buf = vim.api.nvim_create_buf(false, true)
-    vim.api.nvim_buf_set_option(M.buf, "filetype", "netrw")
+    vim.api.nvim_buf_set_option(M.buf, "filetype", "tree")
     vim.api.nvim_buf_set_option(M.buf, "buftype", "nofile")
   end
   
@@ -422,9 +422,9 @@ vim.api.nvim_create_autocmd("DiagnosticChanged", {
   end
 })
 
--- Force minimal UI on any netrw buffer (even opened via :e .)
+-- Force minimal UI on any tree buffer
 vim.api.nvim_create_autocmd("FileType", {
-  pattern = "netrw",
+  pattern = "tree",
   callback = function()
     vim.opt_local.number = false
     vim.opt_local.relativenumber = false

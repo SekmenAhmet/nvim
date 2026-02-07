@@ -12,42 +12,38 @@ function M.on_attach(client, bufnr)
   if client.server_capabilities.completionProvider then
     vim.bo[bufnr].omnifunc = "v:lua.vim.lsp.omnifunc"
   end
-  
-  -- LSP Signs configuration
-  vim.diagnostic.config({
-    signs = {
-      text = {
-        [vim.diagnostic.severity.ERROR] = "E",
-        [vim.diagnostic.severity.WARN] = "W",
-        [vim.diagnostic.severity.INFO] = "I",
-        [vim.diagnostic.severity.HINT] = "H",
-      },
-      linehl = {
-        [vim.diagnostic.severity.ERROR] = "DiagnosticLineError",
-      },
-      numhl = {
-        [vim.diagnostic.severity.ERROR] = "DiagnosticError",
-        [vim.diagnostic.severity.WARN] = "DiagnosticWarn",
-        [vim.diagnostic.severity.INFO] = "DiagnosticInfo",
-        [vim.diagnostic.severity.HINT] = "DiagnosticHint",
-      },
-    },
-    underline = true,        -- Souligner les erreurs
-    virtual_text = false,    -- Pas de texte à droite (propre)
-    severity_sort = true,    -- Erreurs d'abord
-    float = {
-      focusable = false,
-      border = "rounded",
-      source = "if_many",
-      prefix = "",
-      scope = "cursor",
-    },
-  }, bufnr)
+
+  -- Auto-format on save
+  if client.server_capabilities.documentFormattingProvider then
+    vim.api.nvim_create_autocmd("BufWritePre", {
+      group = vim.api.nvim_create_augroup("LspFormat." .. bufnr, { clear = true }),
+      buffer = bufnr,
+      callback = function()
+        vim.lsp.buf.format({ bufnr = bufnr, async = false })
+      end,
+    })
+  end
 end
 
 -- Configuration globale des diagnostics
 vim.diagnostic.config({
-  signs = true,
+  signs = {
+    text = {
+      [vim.diagnostic.severity.ERROR] = "E",
+      [vim.diagnostic.severity.WARN] = "W",
+      [vim.diagnostic.severity.INFO] = "I",
+      [vim.diagnostic.severity.HINT] = "H",
+    },
+    linehl = {
+      [vim.diagnostic.severity.ERROR] = "DiagnosticLineError",
+    },
+    numhl = {
+      [vim.diagnostic.severity.ERROR] = "DiagnosticError",
+      [vim.diagnostic.severity.WARN] = "DiagnosticWarn",
+      [vim.diagnostic.severity.INFO] = "DiagnosticInfo",
+      [vim.diagnostic.severity.HINT] = "DiagnosticHint",
+    },
+  },
   underline = true,
   virtual_text = false,
   severity_sort = true,
@@ -58,6 +54,7 @@ vim.diagnostic.config({
     source = "if_many",
     header = "",
     prefix = "",
+    scope = "cursor",
   },
 })
 
@@ -71,28 +68,15 @@ vim.api.nvim_create_autocmd("CursorHold", {
       return
     end
     
-    -- Vérifier s'il y a des diagnostics à la position actuelle
-    local cursor_pos = vim.api.nvim_win_get_cursor(0)
-    local line = cursor_pos[1] - 1
-    local col = cursor_pos[2]
-    
-    local diagnostics = vim.diagnostic.get(0, { lnum = line })
-    if #diagnostics > 0 then
-      -- Vérifier si le curseur est sur un diagnostic
-      for _, d in ipairs(diagnostics) do
-        if col >= d.col and col <= d.end_col then
-          vim.diagnostic.open_float(nil, {
-            focusable = false,
-            close_events = { "BufLeave", "CursorMoved", "InsertEnter", "FocusLost" },
-            border = "rounded",
-            source = "if_many",
-            prefix = "",
-            scope = "cursor",
-          })
-          break
-        end
-      end
-    end
+    -- API Native optimisée : ne s'ouvre que si un diagnostic est sous le curseur
+    vim.diagnostic.open_float(nil, {
+      focusable = false,
+      close_events = { "BufLeave", "CursorMoved", "InsertEnter", "FocusLost" },
+      border = "rounded",
+      source = "if_many",
+      prefix = "",
+      scope = "cursor",
+    })
   end,
 })
 

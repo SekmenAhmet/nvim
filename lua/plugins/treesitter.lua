@@ -22,8 +22,8 @@ return {
       configs.setup({
         -- On laisse l'utilisateur ou le système gérer l'installation des parseurs
         -- car tree-sitter-cli n'est pas forcément présent.
-        ensure_installed = {}, 
-        auto_install = false, 
+        ensure_installed = { "lua", "vim", "vimdoc", "query", "markdown", "markdown_inline" }, 
+        auto_install = true, 
         sync_install = false,
         highlight = { enable = true },
         indent = { enable = true },

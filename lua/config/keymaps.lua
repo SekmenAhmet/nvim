@@ -26,65 +26,38 @@ vim.keymap.set("n", "<S-Tab>", ":bprev<CR>", { silent = true, desc = "Previous B
 -- Smart Buffer Delete avec gestion des cas edge
 local function smart_buffer_delete()
   local buf = vim.api.nvim_get_current_buf()
-  local buf_name = vim.api.nvim_buf_get_name(buf)
-  local buf_modified = vim.bo[buf].modified
-  local buf_type = vim.bo[buf].buftype
   
-  -- Ne pas fermer certains buffers spéciaux
-  if buf_type == "terminal" then
-    -- Pour le terminal, utiliser la fermeture spéciale
+  -- 1. Terminal : Force delete
+  if vim.bo[buf].buftype == "terminal" then
     vim.cmd("bdelete! " .. buf)
     return
   end
   
-  -- Si buffer modifié, demander confirmation
-  if buf_modified then
-    local choice = vim.fn.confirm(
-      "Buffer modifié. Sauvegarder?", 
-      "&Oui\n&Non (perdre)\n&Annuler", 
-      3
-    )
+  -- 2. Modified : Confirm
+  if vim.bo[buf].modified then
+    local choice = vim.fn.confirm("Buffer modifié. Sauvegarder?", "&Oui\n&Non (perdre)\n&Annuler", 3)
     if choice == 1 then
-      -- Oui : sauvegarder puis fermer
       vim.cmd("write")
     elseif choice == 3 then
-      -- Annuler : ne rien faire
       return
     end
-    -- Non : continuer sans sauvegarder
   end
   
-  -- Récupérer la liste des buffers listés
-  local buffers = vim.fn.getbufinfo({buflisted = 1})
-  local current_index = nil
-  
-  -- Trouver l'index du buffer actuel
-  for i, b in ipairs(buffers) do
-    if b.bufnr == buf then
-      current_index = i
-      break
-    end
-  end
-  
-  if #buffers > 1 then
-    -- Essayer d'aller au buffer précédent dans l'historique
-    local ok = pcall(vim.cmd, "bprevious")
-    if not ok or vim.api.nvim_get_current_buf() == buf then
-      -- Si échec, aller au suivant
-      pcall(vim.cmd, "bnext")
-    end
+  -- 3. Navigation : Try Alt (#) -> Next -> New
+  local alt = vim.fn.bufnr("#")
+  if alt ~= -1 and alt ~= buf and vim.fn.buflisted(alt) == 1 then
+    vim.api.nvim_set_current_buf(alt)
   else
-    -- Dernier buffer : créer un nouveau
-    vim.cmd("enew")
+    vim.cmd("bnext")
+    if vim.api.nvim_get_current_buf() == buf then
+      vim.cmd("enew") -- Dernier buffer
+    end
   end
   
-  -- Supprimer le buffer original
+  -- 4. Delete
   if vim.api.nvim_buf_is_valid(buf) then
-    vim.cmd("bdelete " .. buf)
+    pcall(vim.cmd, "bdelete! " .. buf)
   end
-  
-  -- Notification subtile
-  vim.notify("Buffer fermé", vim.log.levels.INFO, { timeout = 500 })
 end
 
 -- Helper to close all buffers

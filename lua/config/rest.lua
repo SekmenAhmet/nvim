@@ -35,7 +35,7 @@ local State = {
 }
 
 -- ============================================================================
---  3. UTILS & OPENAPI ENGINE
+--  3. UTILS & ROBUST OPENAPI ENGINE
 -- ============================================================================
 
 local U = {}
@@ -45,111 +45,222 @@ function U.debounce(ms, f)
   return function(...) local a={...}; t:stop(); t:start(ms,0,vim.schedule_wrap(function() f(unpack(a)) end)) end
 end
 
--- Robust OpenAPI 3.0 Parser/Dumper (Native Lua)
 local YAML = {}
 
--- Parse simplified OpenAPI structure
+-- Helper: Count indentation spaces
+local function indent_len(line) return #(line:match("^(%s*)")) end
+
+-- Helper: Check if line is a path definition (starts with / or quote+/)
+local function is_path_key(line)
+  local content = vim.trim(line)
+  return content:match("^['\"]?/") and content:match(":$")
+end
+
+-- Helper: Check if line is a method definition
+local function is_method_key(line)
+  local content = vim.trim(line)
+  local m = content:match("^(%w+):")
+  return m and vim.tbl_contains(Config.methods, m:upper())
+end
+
 function YAML.parse(content)
-  local tree = {}
+  local root_tree = {}
   local lines = vim.split(content, "\n")
-  local current_path = nil
-  local current_method = nil
-  local base_url = "http://localhost"
   
-  -- 1. Scan for Server URL
+  -- State preservation
+  State.yaml_header = {}
+  State.yaml_footer = {}
+  State.indent_style = "  "
+  
+  local mode = "HEADER"
+  local paths_indent = -1
+  local current_full_path = nil
+  local base_url = "http://localhost"
+
+  -- Helper to find/create folder path
+  local function get_target_list(tree, path_str)
+    -- Remove leading slash
+    local clean_path = path_str:gsub("^/", "")
+    if clean_path == "" then return tree, "/" end -- Root path case
+    
+    local parts = vim.split(clean_path, "/")
+    -- The last part is the request name itself, we only want folders for the previous parts
+    -- BUT: if path is /users, parts={"users"}. We want 'users' to be the request in root.
+    -- If path is /auth/login, parts={"auth", "login"}. 'auth' is folder, 'login' is request.
+    
+    local current_list = tree
+    
+    -- Iterate up to second-to-last part to create folders
+    for i = 1, #parts - 1 do
+      local folder_name = parts[i]
+      local found = nil
+      for _, node in ipairs(current_list) do
+        if node.type == "folder" and node.name == folder_name then
+          found = node
+          break
+        end
+      end
+      
+      if not found then
+        found = {
+          id = U.uuid(),
+          name = folder_name,
+          type = "folder",
+          expanded = true,
+          children = {},
+          variables = {}
+        }
+        table.insert(current_list, found)
+      end
+      current_list = found.children
+    end
+    
+    return current_list, parts[#parts] -- return the list and the final name
+  end
+
+  -- First pass: Header scan
   for _, line in ipairs(lines) do
+    if mode == "HEADER" and line:match("^%s*paths:") then break end
     local url = line:match("^%s*-%s*url:%s*(.*)")
-    if url then base_url = vim.trim(url); break end
+    if url and not url:match("{") then base_url = vim.trim(url):gsub("['\"]", "") end
   end
 
   local i = 1
   while i <= #lines do
     local line = lines[i]
-    -- Detect Path (Indent 2 spaces: '/users':)
-    local path_key = line:match("^  ['\"]?(/[%w_/%-%.]+)['\"]?:")
-    
-    if path_key then
-      current_path = path_key
-      -- Scan methods under this path
+    local trim = vim.trim(line)
+    local indent = indent_len(line)
+
+    if mode == "HEADER" then
+      if line:match("^%s*paths:%s*$") then
+        mode = "PATHS"
+        paths_indent = indent
+        table.insert(State.yaml_header, line)
+      else
+        table.insert(State.yaml_header, line)
+      end
       i = i + 1
-      while i <= #lines do
-        local sub = lines[i]
-        if not sub:match("^    ") then i = i - 1; break end -- End of path block
-        
-        -- Detect Method (Indent 4 spaces: get:)
-        local method_key = sub:match("^    (%w+):")
-        if method_key and vim.tbl_contains(Config.methods, method_key:upper()) then
-          method_key = method_key:upper()
-          local req = {
-            id = U.uuid(),
-            name = method_key .. " " .. current_path, -- Default name
-            type = "request",
-            meta = { method_key .. " " .. base_url .. current_path, "Content-Type: application/json" },
-            body = { "{}" },
-            variables = {}
-          }
-          
-          -- Scan request details (Indent 6+ spaces)
+
+    elseif mode == "PATHS" then
+      if trim ~= "" and indent <= paths_indent and not line:match("^%s*#") then
+        mode = "FOOTER"
+      elseif trim == "" or line:match("^%s*#") then
+        i = i + 1
+      else
+        if is_path_key(line) then
+          current_full_path = trim:gsub(":$", ""):gsub("^['\"]", ""):gsub("['\"]$", "")
           i = i + 1
-          local body_lines = {}
-          local in_body = false
           
           while i <= #lines do
-            local det = lines[i]
-            if not det:match("^      ") then i = i - 1; break end -- End of method block
+            local sub = lines[i]
+            local sub_indent = indent_len(sub)
+            if sub_indent <= indent and vim.trim(sub) ~= "" then break end
+
+            local sub_trim = vim.trim(sub)
             
-            local summary = det:match("^      summary:%s*(.*)")
-            if summary then req.name = vim.trim(summary) end
-            
-            -- Simple Body Extraction (from 'example:' or raw indentation)
-            -- This is a simplified parser for the 'example' field in OpenAPI
-            if det:match("^          example:") then
-               in_body = true
-               local first_line = det:match("^          example:%s*(.*)")
-               if first_line and first_line ~= "" and first_line ~= "|" then
-                 table.insert(body_lines, first_line)
-               end
-            elseif in_body and det:match("^            ") then
-               table.insert(body_lines, det:sub(13)) -- Remove indentation
-            elseif in_body and not det:match("^            ") then
-               in_body = false
+            -- Case 1: $ref
+            if sub_trim:match("^%$ref:") then
+               -- Handle Ref similar to request
+               local target_list, final_name = get_target_list(root_tree, current_full_path)
+               table.insert(target_list, {
+                 id = U.uuid(),
+                 name = final_name .. " [REF]",
+                 type = "request",
+                 meta = { "GET " .. base_url .. current_full_path, "# Ref: " .. sub_trim:match("^%$ref:%s*(.*)") },
+                 body = { "{}" },
+                 variables = {}
+               })
             end
-            
-            i = i + 1
+
+            -- Case 2: Method
+            if is_method_key(sub) then
+               local method = sub_trim:match("^(%w+)"):upper()
+               
+               -- Reconstruct Tree Position
+               local target_list, final_name = get_target_list(root_tree, current_full_path)
+               
+               local req = {
+                 id = U.uuid(),
+                 name = final_name, -- Use the last part of path as name (e.g. 'Login')
+                 type = "request",
+                 meta = { method .. " " .. base_url .. current_full_path, "Content-Type: application/json" },
+                 body = { "{}" }
+               }
+               
+               i = i + 1
+               local body_lines = {}
+               local capturing_body = false
+               
+               while i <= #lines do
+                 local det = lines[i]
+                 if indent_len(det) <= sub_indent and vim.trim(det) ~= "" then i = i - 1; break end
+                 
+                 local det_trim = vim.trim(det)
+                 
+                 if det_trim:match("^summary:") then
+                   req.name = det_trim:match("^summary:%s*(.*)")
+                   capturing_body = false
+                 
+                 elseif det_trim:match("^example:") then
+                    capturing_body = true
+                    local inline = det_trim:match("^example:%s*(.*)")
+                    if inline and inline ~= "|" and inline ~= "" then table.insert(body_lines, inline) end
+                 
+                 elseif capturing_body then
+                    if det:match(":") and not det:match("^%s*[%w_-]+:") then 
+                       table.insert(body_lines, vim.trim(det))
+                    elseif det:match(":") then 
+                       capturing_body = false
+                       i = i - 1
+                    else
+                       table.insert(body_lines, vim.trim(det))
+                    end
+                 end
+                 i = i + 1
+               end
+               
+               if #body_lines > 0 then req.body = body_lines end
+               table.insert(target_list, req)
+            else
+               i = i + 1
+            end
           end
-          
-          if #body_lines > 0 then req.body = body_lines end
-          table.insert(tree, req)
         else
           i = i + 1
         end
       end
-    else
+
+    elseif mode == "FOOTER" then
+      table.insert(State.yaml_footer, line)
       i = i + 1
     end
   end
-  return tree
+
+  return root_tree
 end
 
 function YAML.dump(tree)
-  local lines = {
-    "openapi: 3.0.0",
-    "info:",
-    "  title: API Collection",
-    "  version: 1.0.0",
-    "servers:",
-    "  - url: http://localhost",
-    "paths:"
-  }
+  -- Reconstruct: Header + Generated Paths + Footer
+  local lines = {}
+  
+  -- 1. Header
+  if State.yaml_header and #State.yaml_header > 0 then
+    for _, l in ipairs(State.yaml_header) do table.insert(lines, l) end
+  else
+    -- Fallback default header
+    table.insert(lines, "openapi: 3.0.0")
+    table.insert(lines, "info:")
+    table.insert(lines, "  title: Generated API")
+    table.insert(lines, "  version: 1.0.0")
+    table.insert(lines, "paths:")
+  end
 
-  -- Group by Path to respect OpenAPI structure
+  -- 2. Paths (Grouped)
   local by_path = {}
   for _, node in ipairs(tree) do
     if node.type == "request" then
       local method, url = (node.meta[1] or ""):match("^(%a+)%s+(http%S+)")
       if not method then method = "GET"; url = node.meta[1] or "" end
-      
-      -- Extract path from full URL (remove http://host)
       local path = url:match("^https?://[^/]+(/.*)") or url
       if not path:match("^/") then path = "/" .. path end
       
@@ -158,34 +269,43 @@ function YAML.dump(tree)
     end
   end
 
-  -- Sort paths
-  local paths_sorted = vim.tbl_keys(by_path)
-  table.sort(paths_sorted)
+  local sorted_paths = vim.tbl_keys(by_path)
+  table.sort(sorted_paths)
 
-  for _, path in ipairs(paths_sorted) do
+  for _, path in ipairs(sorted_paths) do
     table.insert(lines, "  '" .. path .. "':")
+    
     for _, req in ipairs(by_path[path]) do
-      local method = (req.meta[1] or "GET"):match("^(%a+)"):lower()
-      table.insert(lines, "    " .. method .. ":")
-      table.insert(lines, "      summary: " .. (req.name or "New Request"))
-      
-      -- Body handling (Standard OpenAPI 'requestBody')
-      if req.body and #req.body > 0 and table.concat(req.body):match("%S") then
-        table.insert(lines, "      requestBody:")
-        table.insert(lines, "        content:")
-        table.insert(lines, "          application/json:")
-        table.insert(lines, "            example: |")
-        for _, l in ipairs(req.body) do
-          table.insert(lines, "              " .. l)
+      -- Special case: Ref
+      if req.meta[2] and req.meta[2]:match("^# Ref:") then
+         local ref = req.meta[2]:match("^# Ref:%s*(.*)")
+         table.insert(lines, "    $ref: " .. ref)
+      else
+        local method = (req.meta[1] or "GET"):match("^(%a+)"):lower()
+        table.insert(lines, "    " .. method .. ":")
+        table.insert(lines, "      summary: " .. (req.name or "Request"))
+        
+        -- Serialize Body (Simplified for OpenAPI valid output)
+        if req.body and #req.body > 0 and table.concat(req.body):match("%S") then
+           table.insert(lines, "      requestBody:")
+           table.insert(lines, "        content:")
+           table.insert(lines, "          application/json:")
+           table.insert(lines, "            example: |")
+           for _, l in ipairs(req.body) do table.insert(lines, "              " .. l) end
         end
+        
+        table.insert(lines, "      responses:")
+        table.insert(lines, "        '200':")
+        table.insert(lines, "          description: OK")
       end
-      
-      table.insert(lines, "      responses:")
-      table.insert(lines, "        '200':")
-      table.insert(lines, "          description: OK")
     end
   end
-  
+
+  -- 3. Footer
+  if State.yaml_footer then
+    for _, l in ipairs(State.yaml_footer) do table.insert(lines, l) end
+  end
+
   return table.concat(lines, "\n")
 end
 
@@ -199,84 +319,168 @@ function DB.init()
   local cwd = vim.uv.cwd()
   State.file_path = cwd .. "/" .. Config.default_file
   
-  -- Auto-detect .yml or .yaml
-  if fn.filereadable(cwd .. "/openapi.yml") == 1 then 
-    State.file_path = cwd .. "/openapi.yml"
+  -- Find existing file
+  local potentials = { "openapi.yaml", "openapi.yml", "swagger.yaml", "swagger.yml" }
+  for _, p in ipairs(potentials) do
+    if fn.filereadable(cwd .. "/" .. p) == 1 then
+      State.file_path = cwd .. "/" .. p
+      break
+    end
   end
 
   local f = io.open(State.file_path, "r")
   if f then
     local content = f:read("*a")
     f:close()
-    if content and content ~= "" then
+    if content then
       State.tree = YAML.parse(content)
     else
       State.tree = {}
     end
   else
+    -- New file init
     State.tree = {}
+    State.yaml_header = { "openapi: 3.0.0", "info:", "  title: API", "  version: 1.0.0", "paths:" }
+    State.yaml_footer = {}
   end
   
   DB.flat()
+  
+  -- Bidirectional Sync: Watch for external changes
+  api.nvim_create_autocmd("BufWritePost", {
+    group = AU_GROUP,
+    pattern = State.file_path,
+    callback = function()
+      -- Eviter de recharger si c'est nous qui venons de sauvegarder (boucle)
+      -- On peut utiliser un timestamp ou juste recharger, c'est rapide.
+      -- Ici on recharge simplement pour être sûr.
+      local current_req_id = State.req_id
+      
+      -- Re-read file
+      local rf = io.open(State.file_path, "r")
+      if rf then
+        local c = rf:read("*a")
+        rf:close()
+        if c then
+           State.tree = YAML.parse(c)
+           DB.flat()
+           UI.draw_side()
+           -- Si la requête active existe toujours, on la recharge pour mettre à jour vars/body
+           if current_req_id then
+             local node = DB.find(current_req_id)
+             if node then 
+               App.load(node) 
+             else
+               -- Si elle a disparu, on charge la première dispo
+               -- App.load(nil) -- ou garder l'écran actuel
+             end
+           end
+        end
+      end
+    end
+  })
 end
 
-function DB.save() 
+function DB.save(silent) 
   if not State.tree then return end
   local content = YAML.dump(State.tree)
-  
   local f = io.open(State.file_path, "w+")
   if f then 
     f:write(content)
     f:close()
-    vim.notify("Spec saved: " .. fn.fnamemodify(State.file_path, ":t"), vim.log.levels.INFO) 
+    if not silent then
+      vim.notify("Spec saved: " .. fn.fnamemodify(State.file_path, ":t"), vim.log.levels.INFO) 
+    end
   else
-    vim.notify("Error writing to file", vim.log.levels.ERROR)
+    vim.notify("Error writing file", vim.log.levels.ERROR)
   end 
 end
 
 function DB.flat()
   State.flat = {}
-  -- Flatten logic simpler: Just list requests, folders could be added later if UI supports nesting
-  -- Current YAML parser flattens everything to list of requests
-  for _, n in ipairs(State.tree) do 
-    table.insert(State.flat, { n = n, d = 0 }) 
+  local function rec(list, depth)
+    for _, n in ipairs(list) do 
+      table.insert(State.flat, { n = n, d = depth }) 
+      if n.type == "folder" and n.expanded and n.children then
+        rec(n.children, depth + 1)
+      end
+    end
   end
+  rec(State.tree, 0)
 end
 
-function DB.find(id)
-  for _, n in ipairs(State.tree) do if n.id == id then return n end end
+function DB.find(id, list)
+  list = list or State.tree
+  for _, n in ipairs(list) do 
+    if n.id == id then return n end 
+    if n.children then
+      local found = DB.find(id, n.children)
+      if found then return found end
+    end
+  end
   return nil
 end
 
-function DB.vars(id)
-  -- Simplified variables: Global + Local (merged)
-  -- For now, just return empty or what's in the node
-  local n = DB.find(id)
-  return n and n.variables or {}
-end
-
 function DB.add(list, name)
+  local is_folder = name:sub(-1) == "/"
+  local clean_name = is_folder and name:sub(1, -2) or name
+  
   local n = { 
     id = U.uuid(), 
-    name = name, 
-    type = "request", 
-    meta = {"GET http://localhost/"..name:gsub(" ","-"), "Content-Type: application/json"}, 
-    body = {"{}"}, 
-    variables = {} 
+    name = clean_name, 
+    type = is_folder and "folder" or "request", 
+    expanded = true
   }
-  table.insert(State.tree, n) -- Always add to root in flat mode
+  
+  if is_folder then
+    n.children = {}
+  else
+    n.meta = {"GET http://localhost/"..clean_name:gsub(" ","-"), "Content-Type: application/json"}
+    n.body = {"{}"}
+  end
+
+  table.insert(list, n)
   DB.flat()
   return n
 end
 
 function DB.del(id)
-  for i, n in ipairs(State.tree) do 
-    if n.id == id then 
-      table.remove(State.tree, i)
-      DB.flat()
-      return true 
-    end 
+  local function rec_del(list)
+    for i, n in ipairs(list) do 
+      if n.id == id then 
+        table.remove(list, i)
+        return true 
+      end 
+      if n.children then
+        if rec_del(n.children) then return true end
+      end
+    end
   end
+  
+  if rec_del(State.tree) then
+    DB.flat()
+    return true
+  end
+end
+
+function DB.vars(id)
+  local v = {}
+  -- 1. Global vars from YAML (if any)
+  if State.yaml_header then
+    for _, l in ipairs(State.yaml_header) do
+      local k, val = l:match("^%s*([%w_-]+):%s*(.*)")
+      if k and not vim.tbl_contains({"openapi", "info", "paths"}, k) then v[k] = val end
+    end
+  end
+  -- 2. Request local vars
+  local n = DB.find(id)
+  if n and n.meta then
+    for _, l in ipairs(n.meta) do
+      local k, val = l:match("^#%s*([%w_-]+)%s*=%s*(.*)")
+      if k then v[k] = val end
+    end
+  end
+  return v
 end
 
 -- ============================================================================
@@ -286,11 +490,25 @@ end
 local UI = {}
 function UI.buf(k, ft, init_fn)
   if State.bufs[k] and api.nvim_buf_is_valid(State.bufs[k]) then return State.bufs[k] end
-  local b = api.nvim_create_buf(false, true); api.nvim_buf_set_option(b, "filetype", ft)
+  local b = api.nvim_create_buf(false, true)
+  vim.bo[b].filetype = ft
   api.nvim_buf_set_name(b, "REST_" .. k:upper())
-  if k=="side" or k=="meta" or k=="body" or k=="vars" then api.nvim_buf_set_option(b, "buftype", "acwrite") else api.nvim_buf_set_option(b, "buftype", "nofile") end
-  if k=="meta" or k=="body" then api.nvim_buf_call(b, function() vim.cmd("syn match RestVar /{{.\\{-}}}/"); vim.cmd("hi def link RestVar "..Config.hl.var) end) end
-  if init_fn then init_fn(b) end; State.bufs[k] = b; return b
+  
+  if k=="side" or k=="meta" or k=="body" or k=="vars" then 
+    vim.bo[b].buftype = "acwrite" 
+  else 
+    vim.bo[b].buftype = "nofile" 
+  end
+  
+  if k=="meta" or k=="body" then 
+    api.nvim_buf_call(b, function() 
+      vim.cmd("syn match RestVar /{{.\\{-}}}/")
+      vim.cmd("hi def link RestVar "..Config.hl.var) 
+    end) 
+  end
+  if init_fn then init_fn(b) end
+  State.bufs[k] = b
+  return b
 end
 
 function UI.draw_side()
@@ -340,6 +558,7 @@ end
 local App = {}
 M.App = App
 App.refresh = U.debounce(200, function() if State.req_id and api.nvim_buf_is_valid(State.bufs.meta or -1) then local n = DB.find(State.req_id); if n then n.meta = api.nvim_buf_get_lines(State.bufs.meta, 0, -1, false); UI.draw_side() end end end)
+App.autosave = U.debounce(1000, function() App.sync(); DB.save(true) end)
 
 function App.sync()
   if not State.req_id then return end
@@ -358,45 +577,94 @@ end
 
 function App.run()
   if fn.executable("curl") == 0 then vim.notify("Curl required", vim.log.levels.ERROR); return end
-  App.sync(); if State.job and not State.job:is_closing() then State.job:close() end
-  local n = DB.find(State.req_id); if not n then return end
-  local v = DB.vars(n.id); local function S(s) return (s:gsub("{{(.-)}}", function(k) return v[k] or "{{"..k.."}}" end)) end
-  local meta = {}; for _,l in ipairs(n.meta or {}) do table.insert(meta, S(l)) end
-  local m, u = (meta[1] or ""):match("^(%a+)%s+(http%S+)"); if not m then u=(meta[1] or ""):match("(http%S+)"); m="GET" end
-  if not u then return end
-  local A = { "-s", "-i", "-X", m, u }; for i=2,#meta do if meta[i]:match(":") then table.insert(A, "-H"); table.insert(A, meta[i]) end end
-  local B = S(table.concat(n.body or {}, "\n")); if m~="GET" and #B>0 then table.insert(A, "-d"); table.insert(A, B) end
-  local br = UI.buf("resp", "json"); vim.bo[br].modifiable=true; api.nvim_buf_set_lines(br, 0, -1, false, {"Fetching..."}); vim.bo[br].modifiable=false
+  App.sync()
+  
+  -- Properly kill previous job if it exists
+  if State.job and not State.job:is_closing() then
+    pcall(function() State.job:kill(15) end)
+    State.job:close()
+    State.job = nil
+  end
+
+  local n = DB.find(State.req_id)
+  if not n then return end
+  
+  local meta = n.meta or {}
+  local first_line = meta[1] or ""
+  
+  -- Robust URL/Method capture (supports spaces and query params)
+  local m, u = first_line:match("^(%a+)%s+(.*)")
+  if not m then 
+    m = "GET"
+    u = first_line:gsub("^%s*", "")
+  end
+  u = vim.trim(u)
+  if u == "" then u = "http://localhost" end
+
+  local A = { "-s", "-i", "-X", m, u }
+  
+  -- Headers
+  for i=2,#meta do
+    local h = vim.trim(meta[i])
+    if h ~= "" and h:match(":") then
+      table.insert(A, "-H")
+      table.insert(A, h)
+    end
+  end
+
+  -- Body
+  local B = table.concat(n.body or {}, "\n")
+  if m ~= "GET" and #B > 0 then
+    table.insert(A, "-d")
+    table.insert(A, B)
+  end
+
+  local br = UI.buf("resp", "json")
+  vim.bo[br].modifiable = true
+  api.nvim_buf_set_lines(br, 0, -1, false, { "🚀 " .. m .. " " .. u .. " ..." })
+  vim.bo[br].modifiable = false
+
   local out, dat = vim.uv.new_pipe(false), ""
-  State.job = vim.uv.spawn("curl", { args=A, stdio={nil,out,nil} }, function(c)
-    out:read_stop(); out:close(); State.job=nil
+  State.job = vim.uv.spawn("curl", { args = A, stdio = { nil, out, nil } }, function(code, signal)
+    if out then out:read_stop(); out:close() end
+    State.job = nil
+    
     vim.schedule(function()
-      if not api.nvim_buf_is_valid(br) then return end; vim.bo[br].modifiable=true
-      if c~=0 then api.nvim_buf_set_lines(br, 0, -1, false, {"Error: "..c})
+      if not api.nvim_buf_is_valid(br) then return end
+      vim.bo[br].modifiable = true
+      
+      if code ~= 0 then
+        api.nvim_buf_set_lines(br, 0, -1, false, { "❌ Error (Exit Code: " .. code .. ")", "Signal: " .. (signal or 0) })
+      elseif dat == "" then
+        api.nvim_buf_set_lines(br, 0, -1, false, { "⚠️ Empty response from server" })
       else
-        local p = vim.split(dat, "\r?\n\r?\n"); local cnt = table.concat({ unpack(p, 2) }, "\n\n")
-        if fn.executable("jq")==1 and cnt:match("^%s*[{%[]") then local j=fn.system("jq .", cnt); if vim.v.shell_error==0 then cnt=j end end
-        api.nvim_buf_set_lines(br, 0, -1, false, vim.split(cnt:gsub("\r",""), "\n"))
+        -- Separate headers and body safely (handle 100 Continue etc.)
+        local p = vim.split(dat, "\r?\n\r?\n")
+        local body_start = 2
+        while p[body_start] and p[body_start-1]:match("^HTTP/%d%.%d 100") do
+          body_start = body_start + 1
+        end
+        
+        local cnt = table.concat({ unpack(p, body_start) }, "\n\n")
+        
+        -- Safe JQ formatting
+        if fn.executable("jq") == 1 and cnt:match("%S") and cnt:match("^%s*[{%[]") then
+          local j = fn.system("jq .", cnt)
+          if vim.v.shell_error == 0 then cnt = j end
+        end
+        
+        api.nvim_buf_set_lines(br, 0, -1, false, vim.split(cnt:gsub("\r", ""), "\n"))
       end
-      vim.bo[br].modifiable=false
+      vim.bo[br].modifiable = false
     end)
   end)
-  out:read_start(function(_,d) if d then dat=dat..d end end)
-end
-
-function App.edit_vars(node)
-  App.sync(); local b = UI.buf("vars", "lua", function(buf) App.map_all(buf) end); api.nvim_buf_set_lines(b, 0, -1, false, {})
-  local l={}; for k,v in pairs(node.variables or {}) do table.insert(l, k..' = "'..v..'"') end; api.nvim_buf_set_lines(b, 0, -1, false, l)
-  local W,H = math.floor(vim.o.columns*0.4), math.floor(vim.o.lines*0.4)
-  local w = api.nvim_open_win(b, true, { relative="editor", row=math.floor((vim.o.lines-H)/2), col=math.floor((vim.o.columns-W)/2), width=W, height=H, style="minimal", border="rounded", title=" Vars: "..node.name.." " })
-  vim.wo[w].winhl = "NormalFloat:NormalFloat,FloatBorder:"..Config.hl.border; State.wins.vars = w
-  local function sync_v()
-    local nv = {}; for _,ln in ipairs(api.nvim_buf_get_lines(b, 0, -1, false)) do local k,v=ln:match('^%s*([%w_.-]+)%s*=%s*(.-)%s*$'); if k then v=v:gsub('^["\']',''):gsub('["\']$',''); nv[vim.trim(k)]=vim.trim(v) end end
-    node.variables=nv; vim.bo[b].modified = false
+  
+  if State.job then
+    out:read_start(function(err, d)
+      if err then return end
+      if d then dat = dat .. d end
+    end)
   end
-  local function cl() sync_v(); if api.nvim_win_is_valid(w) then api.nvim_win_close(w, true) end State.wins.vars=nil end
-  vim.keymap.set("n", "<Esc>", cl, {buffer=b, silent=true}); vim.keymap.set("n", "q", cl, {buffer=b, silent=true})
-  api.nvim_create_autocmd("BufWriteCmd", { buffer=b, group=AU_GROUP, callback=function() sync_v(); DB.save() end })
 end
 
 function App.map_all(b)
@@ -404,6 +672,9 @@ function App.map_all(b)
   vim.keymap.set("n", "<Esc>", UI.close, o); vim.keymap.set({"n","i"}, "<C-p>", UI.close, o); vim.keymap.set("n", "q", UI.close, o)
   vim.keymap.set({"n","i"}, "<C-b>", function() State.side_open = not State.side_open; UI.layout(); if State.side_open and State.wins.side then api.nvim_set_current_win(State.wins.side) end end, o)
   api.nvim_create_autocmd("BufWriteCmd", { buffer = b, group = AU_GROUP, callback = function() App.sync(); DB.save(); vim.bo[b].modified=false end })
+  if vim.bo[b].buftype == "acwrite" then
+    api.nvim_create_autocmd({"TextChanged", "TextChangedI"}, { buffer = b, group = AU_GROUP, callback = App.autosave })
+  end
   vim.keymap.set({"n","i"}, "<C-s>", "<cmd>w<cr>", o)
   vim.keymap.set({"n","i"}, "<C-CR>", App.run, o); vim.keymap.set({"n","i"}, "<C-Enter>", App.run, o)
   vim.keymap.set({"n","i"}, "<C-h>", function() 
@@ -433,7 +704,6 @@ function M.toggle()
   UI.buf("side", "rest_tree", function(b)
     App.map_all(b); local o={buffer=b, silent=true, nowait=true}
     vim.keymap.set("n", "a", function() local idx = api.nvim_win_get_cursor(0)[1]; local it = State.flat[idx]; local list = (it and it.n.type=="folder") and it.n.children or State.tree; vim.ui.input({prompt="Create:"}, function(x) if x and x~="" then local n=DB.add(list, x); UI.draw_side(); if n.type=="request" then App.load(n); if State.wins.meta then api.nvim_set_current_win(State.wins.meta) end end end end) end, o)
-    vim.keymap.set("n", "v", function() local idx = api.nvim_win_get_cursor(0)[1]; local it = State.flat[idx]; if it and it.n.type=="folder" then App.edit_vars(it.n) end end, o)
     vim.keymap.set("n", "d", function() local idx = api.nvim_win_get_cursor(0)[1]; local it = State.flat[idx]; if it and fn.confirm("Del?", "&Y\n&N")==1 then DB.del(it.n.id); UI.draw_side(); if State.req_id==it.n.id then App.load(nil) end end end, o)
     vim.keymap.set("n", "<CR>", function() local idx = api.nvim_win_get_cursor(0)[1]; local it = State.flat[idx]; if not it then return end if it.n.type=="folder" then it.n.expanded=not it.n.expanded; DB.flat(); UI.draw_side() else App.load(it.n); if State.wins.meta then api.nvim_set_current_win(State.wins.meta) end end end, {buffer=b, silent=true})
     for _,k in ipairs({"i","o","I","O"}) do vim.keymap.set("n", k, "<Nop>", o) end
@@ -444,10 +714,34 @@ function M.toggle()
     vim.bo[b].completefunc = "v:lua.require'config.rest'.comp"
     vim.keymap.set("i", "{", function() if api.nvim_get_current_line():sub(api.nvim_win_get_cursor(0)[2], api.nvim_win_get_cursor(0)[2])=="{" then vim.schedule(function() api.nvim_feedkeys(api.nvim_replace_termcodes("<C-x><C-u>", true, false, true), "n", true) end) end return "{" end, {buffer=b, expr=true})
     local function cyc(d)
-      local l=api.nvim_buf_get_lines(b, 0, 1, false)[1] or ""; local m,u=l:match("^(%a+)%s+(.*)"); if not m then m="GET"; u=l:gsub("^%s*","") end
-      local idx=1; for i,v in ipairs(Config.methods) do if v==m:upper() then idx=i break end end; idx=(idx+d-1)%#Config.methods+1; api.nvim_buf_set_lines(b, 0, 1, false, {Config.methods[idx].." "..u}); App.refresh()
+      local curr_line = api.nvim_win_get_cursor(0)[1]
+      if curr_line ~= 1 then
+        -- Comportement normal si on n'est pas sur la ligne 1 (méthode/url)
+        local key = d > 0 and "<Down>" or "<Up>"
+        api.nvim_feedkeys(api.nvim_replace_termcodes(key, true, false, true), "n", false)
+        return
+      end
+
+      local l = api.nvim_buf_get_lines(b, 0, 1, false)[1] or ""
+      local m = l:match("^(%a+)")
+      local u = l:sub(#(m or "") + 1) -- Capture tout ce qui suit la méthode exactement
+
+      if not m or not vim.tbl_contains(Config.methods, m:upper()) then
+        m = "GET"
+        u = " " .. l:gsub("^%s*", "")
+      end
+
+      local idx = 1
+      for i, v in ipairs(Config.methods) do
+        if v == m:upper() then idx = i break end
+      end
+
+      idx = (idx + d - 1) % #Config.methods + 1
+      api.nvim_buf_set_lines(b, 0, 1, false, { Config.methods[idx] .. u })
+      App.refresh()
     end
-    vim.keymap.set({"n","i"}, "<Up>", function() cyc(-1) end, {buffer=b}); vim.keymap.set({"n","i"}, "<Down>", function() cyc(1) end, {buffer=b})
+    vim.keymap.set({ "n", "i" }, "<Up>", function() cyc(-1) end, { buffer = b })
+    vim.keymap.set({ "n", "i" }, "<Down>", function() cyc(1) end, { buffer = b })
   end)
   UI.buf("body", "json", function(b) App.map_all(b) end)
   UI.buf("resp", "json", function(b) App.map_all(b); api.nvim_create_autocmd("BufEnter", { buffer=b, callback=function() vim.cmd("stopinsert") end, group=AU_GROUP }) end)

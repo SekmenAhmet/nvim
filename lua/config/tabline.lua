@@ -32,9 +32,13 @@ function M.render()
   local wins = vim.api.nvim_tabpage_list_wins(0)
   for _, win in ipairs(wins) do
     local buf = vim.api.nvim_win_get_buf(win)
-    if vim.bo[buf].filetype == "netrw" then
-       sidebar_width = vim.api.nvim_win_get_width(win)
-       break
+    local ft = vim.bo[buf].filetype
+    if ft == "netrw" or ft == "tree" then
+       -- Vérifier que c'est bien la sidebar à gauche (col 0)
+       if vim.api.nvim_win_get_position(win)[2] == 0 then
+         sidebar_width = vim.api.nvim_win_get_width(win) + 1
+         break
+       end
     end
   end
 

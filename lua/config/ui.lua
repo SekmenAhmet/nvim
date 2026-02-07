@@ -66,11 +66,6 @@ function M.get_icon_data(filename)
   return { icon = "", hl = "IconDefault" }
 end
 
--- Deprecated simple getter (kept for safety)
-function M.get_icon(filename)
-  return M.get_icon_data(filename).icon
-end
-
 -- UI Helpers (Select/Input) - kept from previous version
 -- Helper to create a floating window centered
 local function create_win(width, height, title)
@@ -164,21 +159,34 @@ vim.ui.input = M.input
 function M.open_in_normal_win(file, lnum)
   -- Logic identical to previous, just re-declaring for completeness
   local curr_win = vim.api.nvim_get_current_win()
+  local cur_buf = vim.api.nvim_get_current_buf()
+  local ft = vim.bo[cur_buf].filetype
   local cfg = vim.api.nvim_win_get_config(curr_win)
-  if vim.bo.filetype == "netrw" or cfg.relative ~= "" then
-    vim.cmd("wincmd p")
+  
+  -- Si on est dans le tree ou une fenêtre flottante
+  if ft == "tree" or ft == "netrw" or cfg.relative ~= "" then
+    vim.cmd("wincmd p") -- Aller à la fenêtre précédente
     curr_win = vim.api.nvim_get_current_win()
+    cur_buf = vim.api.nvim_get_current_buf()
+    ft = vim.bo[cur_buf].filetype
     cfg = vim.api.nvim_win_get_config(curr_win)
-    if vim.bo.filetype == "netrw" or cfg.relative ~= "" then
+    
+    -- Si la fenêtre précédente est aussi invalide (ex: on vient de lancer nvim)
+    if ft == "tree" or ft == "netrw" or cfg.relative ~= "" then
       local found = false
       for _, w in ipairs(vim.api.nvim_list_wins()) do
-        if vim.api.nvim_win_get_config(w).relative == "" and vim.bo[vim.api.nvim_win_get_buf(w)].filetype ~= "netrw" then
+        local w_buf = vim.api.nvim_win_get_buf(w)
+        local w_ft = vim.bo[w_buf].filetype
+        if vim.api.nvim_win_get_config(w).relative == "" and w_ft ~= "tree" and w_ft ~= "netrw" then
           vim.api.nvim_set_current_win(w)
           found = true
           break
         end
       end
-      if not found then vim.cmd("vsplit"); vim.cmd("wincmd l") end
+      if not found then 
+        vim.cmd("vsplit") -- Créer une nouvelle fenêtre
+        vim.cmd("wincmd l") -- Aller à droite
+      end
     end
   end
   vim.cmd("edit " .. vim.fn.fnameescape(file))

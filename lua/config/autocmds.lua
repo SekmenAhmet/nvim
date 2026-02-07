@@ -4,8 +4,10 @@
 vim.api.nvim_create_autocmd("BufWritePre", {
   pattern = "*",
   callback = function()
+    -- Save cursor view to restore it later
     local view = vim.fn.winsaveview()
-    vim.cmd([[%s/\s\+$//e]])
+    -- Native efficient substitution: silent (no msg), keep patterns (no search history), e flag (no error if not found)
+    vim.cmd([[silent! keeppatterns %s/\s\+$//e]])
     vim.fn.winrestview(view)
   end,
   desc = "Remove trailing whitespace on save",
