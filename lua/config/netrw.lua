@@ -1,4 +1,5 @@
 local ui = require("config.ui")
+local diag_utils = require("utils")
 
 local M = {}
 M.buf = nil
@@ -106,26 +107,9 @@ end
 
 -- Obtenir le niveau de diagnostic d'un fichier
 local function get_diagnostic_level(filepath)
-  -- Récupérer le buffer ID associé au fichier
   local bufnr = vim.fn.bufnr(filepath)
-  if bufnr == -1 then return nil end  -- Buffer pas chargé
-  
-  local diagnostics = vim.diagnostic.get(bufnr)
-  local has_error = false
-  local has_warn = false
-  
-  for _, d in ipairs(diagnostics) do
-    if d.severity == vim.diagnostic.severity.ERROR then
-      has_error = true
-      break  -- Erreur prioritaire
-    elseif d.severity == vim.diagnostic.severity.WARN then
-      has_warn = true
-    end
-  end
-  
-  if has_error then return "error" end
-  if has_warn then return "warn" end
-  return nil
+  if bufnr == -1 then return nil end
+  return diag_utils.get_diagnostic_level(bufnr)
 end
 
 local function get_items(path)
@@ -269,8 +253,8 @@ function M.toggle()
   
   if not M.buf or not vim.api.nvim_buf_is_valid(M.buf) then
     M.buf = vim.api.nvim_create_buf(false, true)
-    vim.api.nvim_buf_set_option(M.buf, "filetype", "tree")
-    vim.api.nvim_buf_set_option(M.buf, "buftype", "nofile")
+    vim.bo[M.buf].filetype = "tree"
+    vim.bo[M.buf].buftype = "nofile"
   end
   
   vim.cmd("topleft vsplit")
@@ -281,11 +265,11 @@ function M.toggle()
   vim.api.nvim_win_set_width(M.win, width)
   vim.cmd("redrawtabline")
   
-  vim.api.nvim_win_set_option(M.win, "number", false)
-  vim.api.nvim_win_set_option(M.win, "relativenumber", false)
-  vim.api.nvim_win_set_option(M.win, "cursorline", true)
-  vim.api.nvim_win_set_option(M.win, "wrap", false)
-  vim.api.nvim_win_set_option(M.win, "signcolumn", "no")
+  vim.wo[M.win].number = false
+  vim.wo[M.win].relativenumber = false
+  vim.wo[M.win].cursorline = true
+  vim.wo[M.win].wrap = false
+  vim.wo[M.win].signcolumn = "no"
   
   -- Rafraîchir git puis dessiner
   refresh_git_status(function()
@@ -343,8 +327,12 @@ function M.toggle()
   map("<C-h>", "<C-w>h")
 end
 
+-- Augroup for tree autocommands
+local tree_augroup = vim.api.nvim_create_augroup("NativeTree", { clear = true })
+
 -- Rafraîchir sur sauvegarde (pour git status)
 vim.api.nvim_create_autocmd("BufWritePost", {
+  group = tree_augroup,
   pattern = "*",
   callback = function()
     -- Invalider le cache git
@@ -361,6 +349,7 @@ vim.api.nvim_create_autocmd("BufWritePost", {
 
 -- Rafraîchir sur retour de focus (changement de fenêtre)
 vim.api.nvim_create_autocmd({ "FocusGained", "BufEnter" }, {
+  group = tree_augroup,
   callback = function()
     if M.win and vim.api.nvim_win_is_valid(M.win) then
       -- Invalider partiellement le cache
@@ -377,25 +366,13 @@ vim.api.nvim_create_autocmd({ "FocusGained", "BufEnter" }, {
 
 -- Rafraîchir quand les diagnostics changent
 vim.api.nvim_create_autocmd("DiagnosticChanged", {
+  group = tree_augroup,
   callback = function()
     vim.schedule(function()
       if M.win and vim.api.nvim_win_is_valid(M.win) then
         draw_impl()
       end
-      -- Rafraîchir aussi la tabline
-      vim.cmd("redrawtabline")
     end)
-  end
-})
-
--- Force minimal UI on any tree buffer
-vim.api.nvim_create_autocmd("FileType", {
-  pattern = "tree",
-  callback = function()
-    vim.opt_local.number = false
-    vim.opt_local.relativenumber = false
-    vim.opt_local.cursorline = true
-    vim.opt_local.signcolumn = "no"
   end
 })
 

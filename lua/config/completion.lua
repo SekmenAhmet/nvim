@@ -30,8 +30,14 @@ local function check_trigger()
 end
 
 -- Timer unique avec debounce
+local completion_augroup = vim.api.nvim_create_augroup("NativeCompletion", { clear = true })
+-- Guard for hot-reload: cleanup previous timer via registry
+local _reg = rawget(_G, "_completion_timer")
+if _reg then pcall(function() _reg:stop(); _reg:close() end) end
 local timer = vim.uv.new_timer()
+rawset(_G, "_completion_timer", timer)
 vim.api.nvim_create_autocmd("TextChangedI", {
+  group = completion_augroup,
   callback = function()
     timer:stop()
     timer:start(150, 0, vim.schedule_wrap(check_trigger))
@@ -40,6 +46,7 @@ vim.api.nvim_create_autocmd("TextChangedI", {
 
 -- Cleanup timer on VimLeave
 vim.api.nvim_create_autocmd("VimLeave", {
+  group = completion_augroup,
   callback = function()
     if timer then
       timer:stop()

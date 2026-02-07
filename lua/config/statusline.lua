@@ -57,7 +57,10 @@ local function get_git_branch()
 end
 
 -- Update branch only on BufEnter/DirChanged, not every redraw
+local statusline_augroup = vim.api.nvim_create_augroup("NativeStatusline", { clear = true })
+
 vim.api.nvim_create_autocmd({ "BufEnter", "FocusGained", "DirChanged" }, {
+  group = statusline_augroup,
   callback = function()
     vim.b.git_branch = get_git_branch()
   end,

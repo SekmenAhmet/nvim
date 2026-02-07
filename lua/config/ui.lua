@@ -123,12 +123,12 @@ function M.get_icon_data(filename)
   return result
 end
 
--- UI Helpers (Select/Input) - kept from previous version
+-- UI Helpers (Select/Input)
 -- Uses utils.create_centered_win for window creation
 local function create_win(width, height, title)
   return require("utils").create_centered_win({
     width_pct = width / vim.o.columns,
-    height = height,
+    height_pct = height / vim.o.lines,
     title = title,
   })
 end

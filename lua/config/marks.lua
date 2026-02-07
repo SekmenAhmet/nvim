@@ -3,7 +3,7 @@
 
 local M = {}
 local api = vim.api
-local window = require('config.window')
+local window = require('utils')
 
 -- State
 local state = {
@@ -61,7 +61,7 @@ function M.show_marks()
   end
   
   -- Créer fenêtre centrée
-  local win = window.create_centered({
+  local win = window.create_centered_win({
     width_pct = 0.4,
     height = math.min(#marks + 4, 15),
     title = "Marks",
@@ -159,9 +159,6 @@ function M.toggle_mark()
   
   vim.notify("Plus de marques disponibles", vim.log.levels.WARN)
 end
-
--- Setup highlight
-vim.api.nvim_set_hl(0, "MarkSign", { fg = "#e0af68", bold = true })
 
 -- Keymaps
 vim.keymap.set("n", "<leader>'", M.show_marks, { desc = "Show marks" })

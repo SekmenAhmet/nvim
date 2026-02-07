@@ -3,8 +3,8 @@
 
 local M = {}
 local uv = vim.uv
-local ui = require("config.ui") -- Load UI for icons
-local window = require("config.window") -- Window utilities
+local ui = require("config.ui")
+local utils = require("utils")
 
 -- Configuration
 local CONFIG = {
@@ -336,7 +336,7 @@ end
 
 -- 4. Create UI
 local function create_ui()
-  local wins = window.create_dual_pane({
+  local wins = utils.create_dual_pane({
     width_pct = CONFIG.width_pct,
     height_pct = CONFIG.height_pct,
     preview_width_pct = CONFIG.preview_width_pct,
@@ -354,10 +354,10 @@ local function create_ui()
   vim.wo[state.win_preview].number = true
 
   -- Setup scroll preview mappings
-  window.setup_scroll_preview(state, state.buf_list)
+  utils.setup_scroll_preview(state, state.buf_list)
 
   -- Setup auto-close avec nettoyage des highlights
-  window.setup_auto_close(state, {
+  utils.setup_auto_close(state, {
     on_close = function()
       -- Nettoyer les highlights du preview
       local ns = vim.api.nvim_create_namespace("grep_preview")
@@ -418,20 +418,9 @@ function M.open()
   })
 
   local function close()
-    -- Stop and close timers
-    if state.timer_debounce then
-      state.timer_debounce:stop()
-      if not state.timer_debounce:is_closing() then
-        state.timer_debounce:close()
-      end
-    end
-    if state.timer_preview then
-      state.timer_preview:stop()
-      if not state.timer_preview:is_closing() then
-        state.timer_preview:close()
-      end
-    end
-    window.close_windows(state)
+    -- Cleanup timers safely
+    utils.cleanup_timers({ state.timer_debounce, state.timer_preview })
+    utils.close_windows(state)
   end
 
   local function open_result()
@@ -499,21 +488,8 @@ function M.open()
     end
   end, opts)
 
-  local function redirect_to_input(key)
-    local line = vim.api.nvim_buf_get_lines(state.buf_list, 0, 1, false)[1]
-    vim.api.nvim_win_set_cursor(state.win_list, {1, #line})
-    vim.cmd("startinsert")
-    if key then
-      local k = vim.api.nvim_replace_termcodes(key, true, false, true)
-      vim.api.nvim_feedkeys(k, "n", true)
-    end
-  end
-
-  for i = 32, 126 do
-    local char = string.char(i)
-    vim.keymap.set("n", char, function() redirect_to_input(char) end, opts)
-  end
-  vim.keymap.set("n", "<BS>", function() redirect_to_input("<BS>") end, opts)
+  -- AUTO-REDIRECT INPUT: Type anywhere to search
+  utils.setup_redirect_input(state.buf_list, function() return state.win_list end)
 end
 
 return M

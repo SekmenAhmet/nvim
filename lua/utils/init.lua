@@ -9,20 +9,21 @@ local api = vim.api
 -- =============================================================================
 
 -- Create a centered floating window
--- @param opts table: { width_pct, height, height_pct, title, row_offset }
+-- @param opts table: { width_pct, height_pct OR height (in lines), title, row_offset }
 -- @return table: { buf = number, win = number }
 function M.create_centered_win(opts)
   opts = opts or {}
   local width_pct = opts.width_pct or 0.25
-  local height = opts.height
-  local height_pct = opts.height_pct
   local title = opts.title or ""
   local row_offset = opts.row_offset or 2
 
-  -- Calculate height
-  if not height and height_pct then
-    height = math.floor(vim.o.lines * height_pct)
-  elseif not height then
+  -- Support both height (absolute lines) and height_pct (ratio)
+  local height
+  if opts.height then
+    height = opts.height
+  elseif opts.height_pct then
+    height = math.floor(vim.o.lines * opts.height_pct)
+  else
     height = 1
   end
 
@@ -124,54 +125,132 @@ function M.create_dual_pane(opts)
   }
 end
 
+-- Setup scroll preview keymaps (C-d / C-u)
+-- @param state table: containing win_preview
+-- @param buf_list number: buffer to map
+function M.setup_scroll_preview(state, buf_list)
+  buf_list = buf_list or state.buf_list
+  
+  local function scroll_preview(direction)
+    if state.win_preview and api.nvim_win_is_valid(state.win_preview) then
+      api.nvim_win_call(state.win_preview, function()
+        local key = direction > 0 and "<C-d>" or "<C-u>"
+        vim.cmd("normal! " .. api.nvim_replace_termcodes(key, true, false, true))
+      end)
+    end
+  end
+  
+  vim.keymap.set({"i", "n"}, "<C-d>", function() scroll_preview(1) end, { buffer = buf_list })
+  vim.keymap.set({"i", "n"}, "<C-u>", function() scroll_preview(-1) end, { buffer = buf_list })
+end
+
+-- Setup auto-close: when list closes, close preview and cleanup
+-- @param state table: containing win_list, win_preview, job_handle
+-- @param opts table: { on_close = function }
+function M.setup_auto_close(state, opts)
+  opts = opts or {}
+  local on_close = opts.on_close
+
+  api.nvim_create_autocmd("WinClosed", {
+    pattern = tostring(state.win_list),
+    once = true,
+    callback = function()
+      -- Close preview window
+      if state.win_preview and api.nvim_win_is_valid(state.win_preview) then
+        api.nvim_win_close(state.win_preview, true)
+      end
+      
+      -- Cleanup job handle if present
+      if state.job_handle and not state.job_handle:is_closing() then
+        state.job_handle:close()
+      end
+      
+      -- Call custom cleanup if provided
+      if on_close then
+        on_close()
+      end
+    end,
+  })
+end
+
+-- Close windows gracefully
+-- @param state table: containing win_list
+function M.close_windows(state)
+  if state.win_list and api.nvim_win_is_valid(state.win_list) then
+    api.nvim_win_close(state.win_list, true)
+  end
+end
+
+-- Cleanup timers safely
+-- @param timers table: list of timers to cleanup
+function M.cleanup_timers(timers)
+  for _, timer in ipairs(timers or {}) do
+    if timer and not timer:is_closing() then
+      timer:stop()
+      timer:close()
+    end
+  end
+end
+
 -- =============================================================================
--- STATE UTILITIES
+-- DIAGNOSTIC UTILITIES
 -- =============================================================================
 
--- Create a standardized state template for UI modules
--- @return table: state object with cleanup method
-function M.create_state()
-  return {
-    buf = nil,
-    win = nil,
-    autocmds = {},
-    timers = {},
-    
-    -- Add autocmd to state for automatic cleanup
-    add_autocmd = function(self, event, opts)
-      local id = api.nvim_create_autocmd(event, opts)
-      table.insert(self.autocmds, id)
-      return id
-    end,
-    
-    -- Add timer to state for automatic cleanup
-    add_timer = function(self, timer)
-      table.insert(self.timers, timer)
-      return timer
-    end,
-    
-    -- Cleanup all resources
-    cleanup = function(self)
-      -- Close window if valid
-      if self.win and api.nvim_win_is_valid(self.win) then
-        api.nvim_win_close(self.win, true)
-      end
-      
-      -- Delete autocmds
-      for _, id in ipairs(self.autocmds) do
-        pcall(api.nvim_del_autocmd, id)
-      end
-      self.autocmds = {}
-      
-      -- Stop timers
-      for _, timer in ipairs(self.timers) do
-        if timer and not timer:is_closing() then
-          timer:stop()
-        end
-      end
-      self.timers = {}
+-- Get the diagnostic severity level for a buffer
+-- @param bufnr number: buffer number
+-- @return string|nil: "error", "warn", or nil
+function M.get_diagnostic_level(bufnr)
+  local errs = #vim.diagnostic.get(bufnr, { severity = vim.diagnostic.severity.ERROR })
+  if errs > 0 then return "error" end
+  local warns = #vim.diagnostic.get(bufnr, { severity = vim.diagnostic.severity.WARN })
+  if warns > 0 then return "warn" end
+  return nil
+end
+
+-- =============================================================================
+-- INPUT UTILITIES (Shared by finder/grep)
+-- =============================================================================
+
+-- Redirect normal mode keystrokes to input line (line 1)
+-- @param buf number: buffer to map
+-- @param win number|function: window handle or function returning it
+function M.setup_redirect_input(buf, get_win)
+  local function redirect_to_input(key)
+    local win = type(get_win) == "function" and get_win() or get_win
+    local line = api.nvim_buf_get_lines(buf, 0, 1, false)[1]
+    api.nvim_win_set_cursor(win, {1, #line})
+    vim.cmd("startinsert")
+    if key then
+      local k = api.nvim_replace_termcodes(key, true, false, true)
+      api.nvim_feedkeys(k, "n", true)
     end
-  }
+  end
+
+  local opts = { buffer = buf }
+  for i = 32, 126 do
+    local char = string.char(i)
+    vim.keymap.set("n", char, function() redirect_to_input(char) end, opts)
+  end
+  vim.keymap.set("n", "<BS>", function() redirect_to_input("<BS>") end, opts)
+end
+
+-- =============================================================================
+-- LAZY LOADING UTILITIES
+-- =============================================================================
+
+-- Create a lazy keymap that requires a module on first use
+-- @param module string: module path to require
+-- @param fn string|function: function to call (string for method name, function for custom)
+-- @return function: keymap callback
+function M.lazy_require(module, fn)
+  return function()
+    local mod = require(module)
+    if type(fn) == "string" then
+      mod[fn]()
+    else
+      fn(mod)
+    end
+  end
 end
 
 return M

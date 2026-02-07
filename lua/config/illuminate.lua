@@ -1,5 +1,5 @@
 -- Illumination Word - Surligne toutes les occurrences du mot sous le curseur
--- Style VSCode, très subtil et performant (vim.uv timer version)
+-- Style VSCode, très subtil et performant
 
 local M = {}
 local api = vim.api
@@ -7,13 +7,9 @@ local ns = api.nvim_create_namespace('illuminate')
 
 -- Configuration
 local config = {
-  delay = 300,              -- Délai avant highlight (ms)
-  min_word_length = 2,      -- Longueur minimale du mot
-  max_occurrences = 100,    -- Limite pour performance
+  min_word_length = 2,
+  max_occurrences = 100,
 }
-
--- Timer unique réutilisable (vim.uv pour meilleure performance)
-local timer = vim.uv.new_timer()
 
 -- Vérifier si un caractère est un mot
 local function is_word_char(char)
@@ -44,7 +40,7 @@ function M.highlight()
   local occurrence_count = 0
 
   -- Parcourir les lignes
-  for line_num = 0, math.min(line_count - 1, 500) do  -- Limiter à 500 lignes pour perf
+  for line_num = 0, math.min(line_count - 1, 500) do
     if occurrence_count >= config.max_occurrences then
       break
     end
@@ -85,48 +81,22 @@ function M.clear()
   end
 end
 
--- Débounced highlight (vim.uv timer)
-function M.debounced_highlight()
-  -- Stop timer précédent
-  timer:stop()
-
-  -- Démarrer nouveau timer
-  timer:start(config.delay, 0, vim.schedule_wrap(function()
-    M.highlight()
-  end))
-end
-
--- Cleanup on exit
-vim.api.nvim_create_autocmd("VimLeave", {
-  callback = function()
-    if timer then
-      timer:stop()
-      if not timer:is_closing() then
-        timer:close()
-      end
-      timer = nil
-    end
-  end,
-})
-
 -- Setup
 function M.setup()
-  -- Autocmd pour highlight après délai
+  local augroup = api.nvim_create_augroup("Illuminate", { clear = true })
+
+  -- Autocmd pour highlight (utilise updatetime comme délai natif)
   api.nvim_create_autocmd('CursorHold', {
-    callback = M.debounced_highlight,
+    group = augroup,
+    callback = M.highlight,
     desc = 'Illuminate word under cursor',
   })
 
   -- Autocmd pour nettoyer quand on bouge
   api.nvim_create_autocmd({'CursorMoved', 'InsertEnter', 'BufLeave'}, {
+    group = augroup,
     callback = M.clear,
     desc = 'Clear word illumination',
-  })
-
-  -- Highlight group (très subtil)
-  api.nvim_set_hl(0, 'IlluminatedWord', {
-    bg = '#2f3346',
-    fg = '#c0caf5',
   })
 end
 

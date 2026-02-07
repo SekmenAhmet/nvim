@@ -3,7 +3,7 @@
 
 local M = {}
 local api = vim.api
-local window = require('config.window')
+local window = require('utils')
 
 -- State
 local state = {

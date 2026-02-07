@@ -55,7 +55,6 @@ function M.toggle()
   vim.wo[terminal_win].number = false
   vim.wo[terminal_win].relativenumber = false
 
-  -- Enter insert mode immediately
   vim.cmd("startinsert")
 
   -- Mappings sécurisés

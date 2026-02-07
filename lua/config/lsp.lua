@@ -76,14 +76,6 @@ vim.api.nvim_create_autocmd("CursorHold", {
   end,
 })
 
--- Rafraîchir la tabline quand les diagnostics changent
-vim.api.nvim_create_autocmd("DiagnosticChanged", {
-  group = lsp_global_augroup,
-  callback = function()
-    vim.cmd("redrawtabline")
-  end,
-})
-
 M.capabilities = vim.lsp.protocol.make_client_capabilities()
 M.capabilities.textDocument.completion.completionItem.snippetSupport = true
 

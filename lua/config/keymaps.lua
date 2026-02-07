@@ -1,17 +1,17 @@
--- Navigation entre fenêtres : Ctrl+HJKL (Toutes directions)
-vim.keymap.set("n", "<C-h>", "<C-w>h", { silent = true, desc = "Go to left window" })
-vim.keymap.set("n", "<C-j>", "<C-w>j", { silent = true, desc = "Go to window below" })
-vim.keymap.set("n", "<C-k>", "<C-w>k", { silent = true, desc = "Go to window above" })
-vim.keymap.set("n", "<C-l>", "<C-w>l", { silent = true, desc = "Go to right window" })
+local utils = require("utils")
+
+-- Navigation entre fenêtres : Ctrl+HJKL
+for _, dir in ipairs({"h", "j", "k", "l"}) do
+  local desc = ({ h = "left", j = "below", k = "above", l = "right" })[dir]
+  vim.keymap.set("n", "<C-" .. dir .. ">", "<C-w>" .. dir, { silent = true, desc = "Go to " .. desc .. " window" })
+end
 
 -- Resize du tree avec Ctrl+Alt+flèches (Inversé)
 vim.keymap.set("n", "<C-M-Left>", "<cmd>vertical resize +2<CR>", { silent = true, desc = "Increase window width" })
 vim.keymap.set("n", "<C-M-Right>", "<cmd>vertical resize -2<CR>", { silent = true, desc = "Decrease window width" })
 
 -- Sauvegarde rapide avec Ctrl+S
-vim.keymap.set("n", "<C-s>", ":w<CR>", { silent = true, desc = "Save file" })
-vim.keymap.set("i", "<C-s>", "<Esc>:w<CR>a", { silent = true, desc = "Save file" })
-vim.keymap.set("v", "<C-s>", "<Esc>:w<CR>", { silent = true, desc = "Save file" })
+vim.keymap.set({"n", "i", "v"}, "<C-s>", "<cmd>w<CR>", { silent = true, desc = "Save file" })
 
 -- Navigation entre les buffers (Onglets)
 vim.keymap.set("n", "<Tab>", ":bnext<CR>", { silent = true, desc = "Next Buffer" })
@@ -76,31 +76,12 @@ vim.keymap.set("n", "<leader>X", close_all_buffers, { silent = true, desc = "Clo
 vim.keymap.set("i", "<C-BS>", "<C-W>", { desc = "Delete previous word" })
 vim.keymap.set("i", "<C-h>", "<C-W>", { desc = "Delete previous word" })
 
--- Lazy Loading Triggers
--- These load the module only when the key is pressed
-
--- Finder (Leader ff)
-vim.keymap.set("n", "<leader>ff", function() require("config.finder").open() end, { desc = "Find Files (Native)" })
-
--- Live Grep (Leader fg)
-vim.keymap.set("n", "<leader>fg", function() require("config.grep").open() end, { desc = "Live Grep (Native)" })
-
--- Native Search (Replace /)
-vim.keymap.set("n", "/", function() require("config.search").open() end, { desc = "Search in file (Native)" })
-
--- Native Cmdline (Replace :)
-vim.keymap.set({"n", "v"}, ":", function() require("config.cmdline").open() end, { desc = "Command Line (Native)" })
-
--- Native REST Client (Postman-like)
-vim.keymap.set({"n", "i"}, "<C-p>", function() require("config.rest").open() end, { desc = "Open REST Client" })
-
--- Terminal (Ctrl+t)
-local function toggle_term() require("config.terminal").toggle() end
-vim.keymap.set({"n", "i", "t"}, "<C-t>", toggle_term, { desc = "Toggle terminal" })
-
--- Netrw Tree (Ctrl+b)
-local function toggle_netrw() require("config.netrw").toggle() end
-vim.keymap.set({"n", "i", "v"}, "<C-b>", toggle_netrw, { silent = true, desc = "Toggle file tree" })
-
--- Git Dashboard (Ctrl+g)
-vim.keymap.set({"n", "i", "t"}, "<C-g>", function() require("config.git").toggle() end, { desc = "Toggle Git Dashboard" })
+-- Lazy Loading Triggers (using utils.lazy_require)
+vim.keymap.set("n", "<leader>ff", utils.lazy_require("config.finder", "open"), { desc = "Find Files (Native)" })
+vim.keymap.set("n", "<leader>fg", utils.lazy_require("config.grep", "open"), { desc = "Live Grep (Native)" })
+vim.keymap.set("n", "/", utils.lazy_require("config.search", "open"), { desc = "Search in file (Native)" })
+vim.keymap.set({"n", "v"}, ":", utils.lazy_require("config.cmdline", "open"), { desc = "Command Line (Native)" })
+vim.keymap.set({"n", "i"}, "<C-p>", utils.lazy_require("config.rest", "open"), { desc = "Open REST Client" })
+vim.keymap.set({"n", "i", "t"}, "<C-t>", utils.lazy_require("config.terminal", "toggle"), { desc = "Toggle terminal" })
+vim.keymap.set({"n", "i", "v"}, "<C-b>", utils.lazy_require("config.netrw", "toggle"), { silent = true, desc = "Toggle file tree" })
+vim.keymap.set({"n", "i", "t"}, "<C-g>", utils.lazy_require("config.git", "toggle"), { desc = "Toggle Git Dashboard" })

@@ -1,5 +1,6 @@
 -- Tabline (Bufferline) Native avec Icônes Colorées et Cache
 local ui = require("config.ui")
+local diag_utils = require("utils")
 local M = {}
 
 -- Cache pour les diagnostics (performance)
@@ -7,19 +8,11 @@ local diag_cache = {}
 
 -- Mettre à jour le cache pour un buffer ou tous
 local function update_diag_cache(bufnr)
-  local function get_level(b)
-    local errs = #vim.diagnostic.get(b, { severity = vim.diagnostic.severity.ERROR })
-    if errs > 0 then return "error" end
-    local warns = #vim.diagnostic.get(b, { severity = vim.diagnostic.severity.WARN })
-    if warns > 0 then return "warn" end
-    return nil
-  end
-
   if bufnr then
-    diag_cache[bufnr] = get_level(bufnr)
+    diag_cache[bufnr] = diag_utils.get_diagnostic_level(bufnr)
   else
     for _, b in ipairs(vim.api.nvim_list_bufs()) do
-      if vim.api.nvim_buf_is_valid(b) then diag_cache[b] = get_level(b) end
+      if vim.api.nvim_buf_is_valid(b) then diag_cache[b] = diag_utils.get_diagnostic_level(b) end
     end
   end
 end
@@ -98,7 +91,10 @@ function M.render()
 end
 
 -- Autocommandes pour le cache et le refresh
+local tabline_augroup = vim.api.nvim_create_augroup("NativeTabline", { clear = true })
+
 vim.api.nvim_create_autocmd("DiagnosticChanged", {
+  group = tabline_augroup,
   callback = function(args)
     update_diag_cache(args.buf)
     vim.cmd("redrawtabline")
@@ -106,8 +102,9 @@ vim.api.nvim_create_autocmd("DiagnosticChanged", {
 })
 
 vim.api.nvim_create_autocmd({ "BufAdd", "BufDelete", "BufEnter" }, {
-  callback = function()
-    update_diag_cache()
+  group = tabline_augroup,
+  callback = function(args)
+    update_diag_cache(args.buf)
     vim.cmd("redrawtabline")
   end,
 })

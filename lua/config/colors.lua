@@ -19,7 +19,6 @@ local c = {
   cyan = "#7dcfff",
   blue = "#7aa2f7",
   purple = "#bb9af7",
-  magenta = "#bb9af7",
 }
 
 function M.setup()
@@ -58,7 +57,7 @@ function M.setup()
   set("Number", { fg = c.orange })
   set("Boolean", { fg = c.orange })
   set("Float", { fg = c.orange })
-  set("Identifier", { fg = c.magenta })
+  set("Identifier", { fg = c.purple })
   set("Function", { fg = c.blue })
   set("Statement", { fg = c.purple })
   set("Conditional", { fg = c.purple })
@@ -81,7 +80,7 @@ function M.setup()
   -- 3. TREESITTER (The real power)
   set("@comment", { link = "Comment" })
   set("@keyword", { fg = c.purple, italic = true })
-  set("@keyword.function", { fg = c.magenta, italic = true })
+  set("@keyword.function", { fg = c.purple, italic = true })
   set("@keyword.return", { fg = c.red, italic = true })
   set("@function", { fg = c.blue })
   set("@function.call", { fg = c.blue })
@@ -107,12 +106,6 @@ function M.setup()
   set("TreeDir", { fg = c.blue, bold = true })
   set("TreeFile", { fg = c.fg })
   set("TreeRoot", { fg = c.purple, bold = true, underline = true })
-  
-  -- Git status in Tree
-  set("GitStatusModified", { fg = c.red, bold = true })
-  set("GitStatusAdded", { fg = c.green, bold = true })
-  set("GitStatusUntracked", { fg = c.yellow })
-  set("GitStatusDeleted", { fg = c.comment })
   
   -- LSP diagnostics in Tree
   set("TreeFileError", { fg = c.red, bold = true })    -- Fichier avec erreurs
@@ -168,6 +161,28 @@ function M.setup()
   set("Pmenu", { bg = c.bg_dark, fg = c.fg })
   set("PmenuSel", { bg = c.bg_visual, fg = "NONE", bold = true })
   set("PmenuThumb", { bg = c.fg_gutter })
+
+  -- Illuminate (word highlight under cursor)
+  set("IlluminatedWord", { bg = "#2f3346", fg = c.fg })
+
+  -- Marks
+  set("MarkSign", { fg = c.yellow, bold = true })
+
+  -- Git Dashboard Syntax Highlighting
+  set("GitStatusStaged", { fg = c.green, bold = true })
+  set("GitStatusUnstaged", { fg = c.yellow })
+  set("GitStatusUntracked", { fg = c.red })
+  set("GitStatusModified", { fg = c.orange })
+  set("GitStatusAdded", { fg = c.green })
+  set("GitStatusDeleted", { fg = c.red })
+  set("GitStatusRenamed", { fg = c.purple })
+  set("GitBranchCurrent", { fg = c.green, bold = true })
+  set("GitBranchLocal", { fg = c.blue })
+  set("GitBranchRemote", { fg = c.purple })
+  set("GitLogGraph", { fg = c.fg_gutter })
+  set("GitLogHash", { fg = c.orange, bold = true })
+  set("GitLogRef", { fg = c.blue })
+  set("GitLogHead", { fg = c.green, bold = true })
 
 end
 

@@ -3,66 +3,19 @@
 
 local M = {}
 local api = vim.api
-local window = require("config.window")
+local window = require("utils")
 
 -- State
 local state = {
   buf = nil,
   win = nil,
-  compl_win = nil,
-  compl_buf = nil,
-  original_guicursor = nil,
 }
-
-local function close_completion()
-  if state.compl_win and api.nvim_win_is_valid(state.compl_win) then
-    api.nvim_win_close(state.compl_win, true)
-    state.compl_win = nil
-  end
-end
-
-local function update_completion(cmd)
-  -- Get native vim completion
-  local items = vim.fn.getcompletion(cmd, "cmdline")
-  
-  if #items == 0 then
-    close_completion()
-    return
-  end
-  
-  -- Limit items
-  if #items > 10 then items = { unpack(items, 1, 10) } end
-  
-  if not state.compl_win or not api.nvim_win_is_valid(state.compl_win) then
-    state.compl_buf = api.nvim_create_buf(false, true)
-    local width = api.nvim_win_get_width(state.win)
-    local row = 2 -- Below cmdline
-    local col = api.nvim_win_get_config(state.win).col
-    
-    state.compl_win = api.nvim_open_win(state.compl_buf, false, {
-      relative = "editor",
-      width = width,
-      height = #items,
-      row = row + 1, -- +1 purely relative to editor? No, row is absolute from editor top
-      -- Actually, easier to make it relative to the cmdline win if supported, but editor relative is safer for positioning
-      row = 2 + 3, -- Cmdline is at row 2, height 1 + border 2 = 3 offset
-      col = col,
-      style = "minimal",
-      border = "rounded",
-    })
-    vim.wo[state.compl_win].winhl = "NormalFloat:NormalFloat,FloatBorder:FloatBorder"
-  else
-    api.nvim_win_set_height(state.compl_win, #items)
-  end
-  
-  api.nvim_buf_set_lines(state.compl_buf, 0, -1, false, items)
-end
 
 function M.open()
   state.original_guicursor = vim.o.guicursor
   
   -- Create Floating Window using window library
-  local win = window.create_centered({
+  local win = window.create_centered_win({
     width_pct = 0.25,
     height = 1,
     title = "Command",
@@ -152,7 +105,6 @@ function M.close()
   if state.win and api.nvim_win_is_valid(state.win) then
     api.nvim_win_close(state.win, true)
   end
-  close_completion()
   vim.cmd("stopinsert")
 end
 

@@ -3,7 +3,7 @@
 
 local M = {}
 local api = vim.api
-local window = require("config.window")
+local window = require("utils")
 
 -- State
 local state = {
@@ -154,7 +154,7 @@ function M.open()
   state.match_ids = {}
   
   -- Créer la fenêtre de recherche
-  local win = window.create_centered({
+  local win = window.create_centered_win({
     width_pct = 0.25,
     height = 1,
     title = "Search",
@@ -190,11 +190,15 @@ function M.open()
   })
   table.insert(state.autocmds, au_typing)
   
-  -- Autocmd: Suivi du curseur dans le buffer cible
+  -- Autocmd: Suivi du curseur dans le buffer cible (throttled)
+  local last_line = nil
   local au_cursor = api.nvim_create_autocmd("CursorMoved", {
     buffer = state.target_buf,
     callback = function()
-      if state.query ~= "" then
+      if state.query == "" then return end
+      local current_line = api.nvim_win_get_cursor(state.target_win)[1]
+      if current_line ~= last_line then
+        last_line = current_line
         update_counter()
       end
     end

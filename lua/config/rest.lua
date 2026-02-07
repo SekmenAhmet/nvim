@@ -518,43 +518,85 @@ function UI.buf(k, ft, init_fn)
 end
 
 function UI.draw_side()
-  local b = State.bufs.side; if not b or not api.nvim_buf_is_valid(b) then return end
+  local b = State.bufs.side
+  if not b or not api.nvim_buf_is_valid(b) then return end
+
   local l, h = {}, {}
-  for i,it in ipairs(State.flat) do
-    local pre = "  "..string.rep("  ", it.d)
+  for i, it in ipairs(State.flat) do
+    local pre = "  " .. string.rep("  ", it.d)
     local m = (it.n.meta and it.n.meta[1] or "GET"):match("^(%a+)") or "GET"
-    local icon = it.n.type=="folder" and (it.n.expanded and " " or " ") or ("["..m.."] ")
+    local icon = it.n.type == "folder"
+      and (it.n.expanded and " " or " ")
+      or ("[" .. m .. "] ")
     table.insert(l, "  " .. pre .. icon .. it.n.name)
-    local g = it.n.type=="folder" and Config.hl.dir or Config.hl.file
-    table.insert(h, {r=i-1, s=0, e=-1, g=g}); if it.n.type=="request" then table.insert(h, {r=i-1, s=#("  "..pre), e=#("  "..pre)+#icon, g=Config.hl.method}) end
+
+    local g = it.n.type == "folder" and Config.hl.dir or Config.hl.file
+    table.insert(h, { r = i - 1, s = 0, e = -1, g = g })
+    if it.n.type == "request" then
+      local offset = #("  " .. pre)
+      table.insert(h, { r = i - 1, s = offset, e = offset + #icon, g = Config.hl.method })
+    end
   end
-  vim.bo[b].modifiable=true; api.nvim_buf_set_lines(b, 0, -1, false, l); vim.bo[b].modifiable=false
-  api.nvim_buf_clear_namespace(b, -1, 0, -1); for _,v in ipairs(h) do api.nvim_buf_add_highlight(b, -1, v.g, v.r, v.s, v.e) end
+
+  vim.bo[b].modifiable = true
+  api.nvim_buf_set_lines(b, 0, -1, false, l)
+  vim.bo[b].modifiable = false
+  api.nvim_buf_clear_namespace(b, -1, 0, -1)
+  for _, v in ipairs(h) do
+    api.nvim_buf_add_highlight(b, -1, v.g, v.r, v.s, v.e)
+  end
 end
 
 function UI.layout()
   if not State.active then return end
-  local W, H = vim.o.columns, math.max(10, vim.o.lines-2)
-  local sw = State.side_open and math.floor(W*Config.ui.side_pct) or 0
-  local mw, ew = W-sw, math.floor((W-sw)/2); local rw = mw-ew; local mh = math.floor(H*Config.ui.meta_pct)
+  local W = vim.o.columns
+  local H = math.max(10, vim.o.lines - 2)
+  local sw = State.side_open and math.floor(W * Config.ui.side_pct) or 0
+  local mw = W - sw
+  local ew = math.floor(mw / 2)
+  local rw = mw - ew
+  local mh = math.floor(H * Config.ui.meta_pct)
+
   local function win(k, b, r, c, w, h, t)
-    if w<=1 then if State.wins[k] and api.nvim_win_is_valid(State.wins[k]) then api.nvim_win_close(State.wins[k], true) end State.wins[k]=nil return end
-    local cfg = { relative="editor", row=r, col=c, width=w-2, height=h-2, style="minimal", border="rounded", title=" "..t.." ", title_pos="left" }
-    if State.wins[k] and api.nvim_win_is_valid(State.wins[k]) then api.nvim_win_set_config(State.wins[k], cfg)
-    else State.wins[k] = api.nvim_open_win(b, false, cfg); vim.wo[State.wins[k]].winhl = "NormalFloat:NormalFloat,FloatBorder:"..Config.hl.border end
+    if w <= 1 then
+      if State.wins[k] and api.nvim_win_is_valid(State.wins[k]) then
+        api.nvim_win_close(State.wins[k], true)
+      end
+      State.wins[k] = nil
+      return
+    end
+    local cfg = {
+      relative = "editor", row = r, col = c,
+      width = w - 2, height = h - 2,
+      style = "minimal", border = "rounded",
+      title = " " .. t .. " ", title_pos = "left",
+    }
+    if State.wins[k] and api.nvim_win_is_valid(State.wins[k]) then
+      api.nvim_win_set_config(State.wins[k], cfg)
+    else
+      State.wins[k] = api.nvim_open_win(b, false, cfg)
+      vim.wo[State.wins[k]].winhl = "NormalFloat:NormalFloat,FloatBorder:" .. Config.hl.border
+    end
   end
+
   win("side", UI.buf("side", "rest_tree"), 0, 0, sw, H, "Collection")
   win("meta", UI.buf("meta", "conf"), 0, sw, ew, mh, "Request")
   win("body", UI.buf("body", "json"), mh, sw, ew, H - mh, "Body")
   win("resp", UI.buf("resp", "json"), 0, sw + ew, rw, H, "Response")
-  if State.wins.side then vim.wo[State.wins.side].cursorline=true end
-  if State.wins.resp then vim.wo[State.wins.resp].wrap=true end
+  if State.wins.side then vim.wo[State.wins.side].cursorline = true end
+  if State.wins.resp then vim.wo[State.wins.resp].wrap = true end
 end
 
 function UI.close()
-  local App = require("config.rest").App; App.sync()
-  for k,w in pairs(State.wins) do if w and api.nvim_win_is_valid(w) then api.nvim_win_close(w, true) end State.wins[k]=nil end
-  State.active=false
+  local App = require("config.rest").App
+  App.sync()
+  for k, w in pairs(State.wins) do
+    if w and api.nvim_win_is_valid(w) then
+      api.nvim_win_close(w, true)
+    end
+    State.wins[k] = nil
+  end
+  State.active = false
 end
 
 -- ============================================================================
@@ -563,7 +605,17 @@ end
 
 local App = {}
 M.App = App
-App.refresh = U.debounce(200, function() if State.req_id and api.nvim_buf_is_valid(State.bufs.meta or -1) then local n = DB.find(State.req_id); if n then n.meta = api.nvim_buf_get_lines(State.bufs.meta, 0, -1, false); UI.draw_side() end end end)
+
+App.refresh = U.debounce(200, function()
+  if State.req_id and api.nvim_buf_is_valid(State.bufs.meta or -1) then
+    local n = DB.find(State.req_id)
+    if n then
+      n.meta = api.nvim_buf_get_lines(State.bufs.meta, 0, -1, false)
+      UI.draw_side()
+    end
+  end
+end)
+
 App.autosave = U.debounce(1000, function() 
   App.sync()
   -- Only save if file exists or if there are routes in the tree
@@ -574,17 +626,32 @@ end)
 
 function App.sync()
   if not State.req_id then return end
-  local n = DB.find(State.req_id); if not n then return end
-  if State.bufs.meta and api.nvim_buf_is_valid(State.bufs.meta) then n.meta = api.nvim_buf_get_lines(State.bufs.meta, 0, -1, false) end
-  if State.bufs.body and api.nvim_buf_is_valid(State.bufs.body) then n.body = api.nvim_buf_get_lines(State.bufs.body, 0, -1, false) end
+  local n = DB.find(State.req_id)
+  if not n then return end
+  if State.bufs.meta and api.nvim_buf_is_valid(State.bufs.meta) then
+    n.meta = api.nvim_buf_get_lines(State.bufs.meta, 0, -1, false)
+  end
+  if State.bufs.body and api.nvim_buf_is_valid(State.bufs.body) then
+    n.body = api.nvim_buf_get_lines(State.bufs.body, 0, -1, false)
+  end
 end
 
 function App.load(node)
-  App.sync(); local m, b = {"GET http://"}, {"{}"}
-  if node and node.type=="request" then State.req_id=node.id; m=node.meta or m; b=node.body or b else State.req_id=nil end
+  App.sync()
+  local m, b = { "GET http://" }, { "{}" }
+  if node and node.type == "request" then
+    State.req_id = node.id
+    m = node.meta or m
+    b = node.body or b
+  else
+    State.req_id = nil
+  end
   api.nvim_buf_set_lines(UI.buf("meta", "conf"), 0, -1, false, m)
   api.nvim_buf_set_lines(UI.buf("body", "json"), 0, -1, false, b)
-  local r = UI.buf("resp", "json"); vim.bo[r].modifiable=true; api.nvim_buf_set_lines(r, 0, -1, false, {}); vim.bo[r].modifiable=false
+  local r = UI.buf("resp", "json")
+  vim.bo[r].modifiable = true
+  api.nvim_buf_set_lines(r, 0, -1, false, {})
+  vim.bo[r].modifiable = false
 end
 
 function App.run()
@@ -680,51 +747,170 @@ function App.run()
 end
 
 function App.map_all(b)
-  local o = { buffer=b, silent=true, nowait=true }
-  vim.keymap.set("n", "<Esc>", UI.close, o); vim.keymap.set({"n","i"}, "<C-p>", UI.close, o); vim.keymap.set("n", "q", UI.close, o)
-  vim.keymap.set({"n","i"}, "<C-b>", function() State.side_open = not State.side_open; UI.layout(); if State.side_open and State.wins.side then api.nvim_set_current_win(State.wins.side) end end, o)
-  api.nvim_create_autocmd("BufWriteCmd", { buffer = b, group = AU_GROUP, callback = function() App.sync(); DB.save(); vim.bo[b].modified=false end })
-  if vim.bo[b].buftype == "acwrite" then
-    api.nvim_create_autocmd({"TextChanged", "TextChangedI"}, { buffer = b, group = AU_GROUP, callback = App.autosave })
-  end
-  vim.keymap.set({"n","i"}, "<C-s>", "<cmd>w<cr>", o)
-  vim.keymap.set({"n","i"}, "<C-CR>", App.run, o); vim.keymap.set({"n","i"}, "<C-Enter>", App.run, o)
-  vim.keymap.set({"n","i"}, "<C-h>", function() 
-    if State.wins.side and api.nvim_win_is_valid(State.wins.side) then api.nvim_set_current_win(State.wins.side)
-    elseif api.nvim_get_current_win() == State.wins.resp then api.nvim_set_current_win(State.wins.meta) end
-  end, o)
-  vim.keymap.set({"n","i"}, "<C-l>", function() 
-    local cur = api.nvim_get_current_win()
-    if cur == State.wins.side then
-      if State.wins.meta and api.nvim_win_is_valid(State.wins.meta) then api.nvim_set_current_win(State.wins.meta) end
-    elseif cur == State.wins.meta or cur == State.wins.body then
-      if State.wins.resp and api.nvim_win_is_valid(State.wins.resp) then api.nvim_set_current_win(State.wins.resp) end
+  local o = { buffer = b, silent = true, nowait = true }
+
+  -- Close mappings
+  vim.keymap.set("n", "<Esc>", UI.close, o)
+  vim.keymap.set({ "n", "i" }, "<C-p>", UI.close, o)
+  vim.keymap.set("n", "q", UI.close, o)
+
+  -- Toggle sidebar
+  vim.keymap.set({ "n", "i" }, "<C-b>", function()
+    State.side_open = not State.side_open
+    UI.layout()
+    if State.side_open and State.wins.side then
+      api.nvim_set_current_win(State.wins.side)
     end
   end, o)
-  vim.keymap.set({"n","i"}, "<C-j>", function() if State.wins.body and api.nvim_win_is_valid(State.wins.body) then api.nvim_set_current_win(State.wins.body) end end, o)
-  vim.keymap.set({"n","i"}, "<C-k>", function() if State.wins.meta and api.nvim_win_is_valid(State.wins.meta) then api.nvim_set_current_win(State.wins.meta) end end, o)
+
+  -- Save hooks
+  api.nvim_create_autocmd("BufWriteCmd", {
+    buffer = b, group = AU_GROUP,
+    callback = function() App.sync(); DB.save(); vim.bo[b].modified = false end,
+  })
+  if vim.bo[b].buftype == "acwrite" then
+    api.nvim_create_autocmd({ "TextChanged", "TextChangedI" }, {
+      buffer = b, group = AU_GROUP, callback = App.autosave,
+    })
+  end
+
+  vim.keymap.set({ "n", "i" }, "<C-s>", "<cmd>w<cr>", o)
+  vim.keymap.set({ "n", "i" }, "<C-CR>", App.run, o)
+  vim.keymap.set({ "n", "i" }, "<C-Enter>", App.run, o)
+
+  -- Navigation between panes
+  vim.keymap.set({ "n", "i" }, "<C-h>", function()
+    if State.wins.side and api.nvim_win_is_valid(State.wins.side) then
+      api.nvim_set_current_win(State.wins.side)
+    elseif api.nvim_get_current_win() == State.wins.resp then
+      api.nvim_set_current_win(State.wins.meta)
+    end
+  end, o)
+
+  vim.keymap.set({ "n", "i" }, "<C-l>", function()
+    local cur = api.nvim_get_current_win()
+    if cur == State.wins.side then
+      if State.wins.meta and api.nvim_win_is_valid(State.wins.meta) then
+        api.nvim_set_current_win(State.wins.meta)
+      end
+    elseif cur == State.wins.meta or cur == State.wins.body then
+      if State.wins.resp and api.nvim_win_is_valid(State.wins.resp) then
+        api.nvim_set_current_win(State.wins.resp)
+      end
+    end
+  end, o)
+
+  vim.keymap.set({ "n", "i" }, "<C-j>", function()
+    if State.wins.body and api.nvim_win_is_valid(State.wins.body) then
+      api.nvim_set_current_win(State.wins.body)
+    end
+  end, o)
+
+  vim.keymap.set({ "n", "i" }, "<C-k>", function()
+    if State.wins.meta and api.nvim_win_is_valid(State.wins.meta) then
+      api.nvim_set_current_win(State.wins.meta)
+    end
+  end, o)
 end
 
 function M.comp(f, b)
-  if f == 1 then local l=api.nvim_get_current_line(); local c=api.nvim_win_get_cursor(0)[2]; local s=l:sub(1,c):find("{{[^}]*$"); return s and s-1 or -1 end
-  local v, r = DB.vars(State.req_id or ""), {}; for k,val in pairs(v) do if k:find("^"..b) then table.insert(r, {word=k.."}}", abbr=k, menu=" ["..val.."]"}) end end return r
+  if f == 1 then
+    local l = api.nvim_get_current_line()
+    local c = api.nvim_win_get_cursor(0)[2]
+    local s = l:sub(1, c):find("{{[^}]*$")
+    return s and s - 1 or -1
+  end
+  local v = DB.vars(State.req_id or "")
+  local r = {}
+  for k, val in pairs(v) do
+    if k:find("^" .. b) then
+      table.insert(r, { word = k .. "}}", abbr = k, menu = " [" .. val .. "]" })
+    end
+  end
+  return r
 end
 
 function M.toggle()
-  if State.active then local v=false; for _,w in pairs(State.wins) do if w and api.nvim_win_is_valid(w) then v = true end end; if v then UI.close(); return end end
-  State.active = true; State.side_open = false; DB.init()
+  if State.active then
+    local v = false
+    for _, w in pairs(State.wins) do
+      if w and api.nvim_win_is_valid(w) then v = true end
+    end
+    if v then UI.close(); return end
+  end
+
+  State.active = true
+  State.side_open = false
+  DB.init()
+
   UI.buf("side", "rest_tree", function(b)
-    App.map_all(b); local o={buffer=b, silent=true, nowait=true}
-    vim.keymap.set("n", "a", function() local idx = api.nvim_win_get_cursor(0)[1]; local it = State.flat[idx]; local list = (it and it.n.type=="folder") and it.n.children or State.tree; vim.ui.input({prompt="Create:"}, function(x) if x and x~="" then local n=DB.add(list, x); UI.draw_side(); if n.type=="request" then App.load(n); if State.wins.meta then api.nvim_set_current_win(State.wins.meta) end end end end) end, o)
-    vim.keymap.set("n", "d", function() local idx = api.nvim_win_get_cursor(0)[1]; local it = State.flat[idx]; if it and fn.confirm("Del?", "&Y\n&N")==1 then DB.del(it.n.id); UI.draw_side(); if State.req_id==it.n.id then App.load(nil) end end end, o)
-    vim.keymap.set("n", "<CR>", function() local idx = api.nvim_win_get_cursor(0)[1]; local it = State.flat[idx]; if not it then return end if it.n.type=="folder" then it.n.expanded=not it.n.expanded; DB.flat(); UI.draw_side() else App.load(it.n); if State.wins.meta then api.nvim_set_current_win(State.wins.meta) end end end, {buffer=b, silent=true})
-    for _,k in ipairs({"i","o","I","O"}) do vim.keymap.set("n", k, "<Nop>", o) end
-    api.nvim_create_autocmd("BufEnter", { buffer=b, callback=function() vim.cmd("stopinsert") end, group=AU_GROUP })
+    App.map_all(b)
+    local o = { buffer = b, silent = true, nowait = true }
+
+    vim.keymap.set("n", "a", function()
+      local idx = api.nvim_win_get_cursor(0)[1]
+      local it = State.flat[idx]
+      local list = (it and it.n.type == "folder") and it.n.children or State.tree
+      vim.ui.input({ prompt = "Create:" }, function(x)
+        if x and x ~= "" then
+          local n = DB.add(list, x)
+          UI.draw_side()
+          if n.type == "request" then
+            App.load(n)
+            if State.wins.meta then api.nvim_set_current_win(State.wins.meta) end
+          end
+        end
+      end)
+    end, o)
+
+    vim.keymap.set("n", "d", function()
+      local idx = api.nvim_win_get_cursor(0)[1]
+      local it = State.flat[idx]
+      if it and fn.confirm("Del?", "&Y\n&N") == 1 then
+        DB.del(it.n.id)
+        UI.draw_side()
+        if State.req_id == it.n.id then App.load(nil) end
+      end
+    end, o)
+
+    vim.keymap.set("n", "<CR>", function()
+      local idx = api.nvim_win_get_cursor(0)[1]
+      local it = State.flat[idx]
+      if not it then return end
+      if it.n.type == "folder" then
+        it.n.expanded = not it.n.expanded
+        DB.flat()
+        UI.draw_side()
+      else
+        App.load(it.n)
+        if State.wins.meta then api.nvim_set_current_win(State.wins.meta) end
+      end
+    end, { buffer = b, silent = true })
+
+    for _, k in ipairs({ "i", "o", "I", "O" }) do
+      vim.keymap.set("n", k, "<Nop>", o)
+    end
+    api.nvim_create_autocmd("BufEnter", {
+      buffer = b, callback = function() vim.cmd("stopinsert") end, group = AU_GROUP,
+    })
   end)
   local bm = UI.buf("meta", "conf", function(b)
-    App.map_all(b); api.nvim_create_autocmd({"TextChanged","TextChangedI"}, { buffer=b, callback=App.refresh, group=AU_GROUP })
+    App.map_all(b)
+    api.nvim_create_autocmd({ "TextChanged", "TextChangedI" }, {
+      buffer = b, callback = App.refresh, group = AU_GROUP,
+    })
     vim.bo[b].completefunc = "v:lua.require'config.rest'.comp"
-    vim.keymap.set("i", "{", function() if api.nvim_get_current_line():sub(api.nvim_win_get_cursor(0)[2], api.nvim_win_get_cursor(0)[2])=="{" then vim.schedule(function() api.nvim_feedkeys(api.nvim_replace_termcodes("<C-x><C-u>", true, false, true), "n", true) end) end return "{" end, {buffer=b, expr=true})
+
+    vim.keymap.set("i", "{", function()
+      local col = api.nvim_win_get_cursor(0)[2]
+      if api.nvim_get_current_line():sub(col, col) == "{" then
+        vim.schedule(function()
+          api.nvim_feedkeys(api.nvim_replace_termcodes("<C-x><C-u>", true, false, true), "n", true)
+        end)
+      end
+      return "{"
+    end, { buffer = b, expr = true })
+
     local function cyc(d)
       local curr_line = api.nvim_win_get_cursor(0)[1]
       if curr_line ~= 1 then
@@ -755,11 +941,30 @@ function M.toggle()
     vim.keymap.set({ "n", "i" }, "<Up>", function() cyc(-1) end, { buffer = b })
     vim.keymap.set({ "n", "i" }, "<Down>", function() cyc(1) end, { buffer = b })
   end)
+
   UI.buf("body", "json", function(b) App.map_all(b) end)
-  UI.buf("resp", "json", function(b) App.map_all(b); api.nvim_create_autocmd("BufEnter", { buffer=b, callback=function() vim.cmd("stopinsert") end, group=AU_GROUP }) end)
-  UI.layout(); UI.draw_side()
-  local function f(l) for _,n in ipairs(l) do if n.type=="request" then return n end if n.children then local r=f(n.children) if r then return r end end end end
-  App.load(DB.find(State.req_id) or f(State.tree)); if State.wins.meta then api.nvim_set_current_win(State.wins.meta) end
+  UI.buf("resp", "json", function(b)
+    App.map_all(b)
+    api.nvim_create_autocmd("BufEnter", {
+      buffer = b, callback = function() vim.cmd("stopinsert") end, group = AU_GROUP,
+    })
+  end)
+
+  UI.layout()
+  UI.draw_side()
+
+  local function find_first_request(l)
+    for _, n in ipairs(l) do
+      if n.type == "request" then return n end
+      if n.children then
+        local r = find_first_request(n.children)
+        if r then return r end
+      end
+    end
+  end
+
+  App.load(DB.find(State.req_id) or find_first_request(State.tree))
+  if State.wins.meta then api.nvim_set_current_win(State.wins.meta) end
 end
 
 M.open = M.toggle

@@ -3,8 +3,8 @@
 
 local M = {}
 local uv = vim.uv
-local ui = require("config.ui") -- Load UI module
-local window = require("config.window") -- Window utilities
+local ui = require("config.ui")
+local utils = require("utils")
 
 -- Configuration
 local CONFIG = {
@@ -162,7 +162,7 @@ end
 
 -- 2. Create UI
 local function create_ui()
-  local wins = window.create_dual_pane({
+  local wins = utils.create_dual_pane({
     width_pct = CONFIG.width_pct,
     height_pct = CONFIG.height_pct,
     preview_width_pct = CONFIG.preview_width_pct,
@@ -178,10 +178,10 @@ local function create_ui()
   state.win_preview = wins.win_preview
 
   -- Setup scroll preview mappings
-  window.setup_scroll_preview(state, state.buf_list)
+  utils.setup_scroll_preview(state, state.buf_list)
 
   -- Setup auto-close
-  window.setup_auto_close(state)
+  utils.setup_auto_close(state)
 end
 
 -- 3. Filter & Render
@@ -369,13 +369,8 @@ function M.open()
 
   -- Actions
   local function close()
-    -- Stop and close preview timer
-    if state.preview_timer then
-      state.preview_timer:stop()
-      if not state.preview_timer:is_closing() then
-        state.preview_timer:close()
-      end
-    end
+    -- Cleanup timers safely
+    utils.cleanup_timers({ state.preview_timer })
     window.close_windows(state)
     -- WinClosed autocommand handles the rest
   end
@@ -415,25 +410,7 @@ function M.open()
   end, opts)
 
   -- AUTO-REDIRECT INPUT: Type anywhere to search
-  local function redirect_to_input(key)
-    -- 1. Move cursor to input line (end)
-    local line = vim.api.nvim_buf_get_lines(state.buf_list, 0, 1, false)[1]
-    vim.api.nvim_win_set_cursor(state.win_list, {1, #line})
-    -- 2. Enter Insert Mode
-    vim.cmd("startinsert")
-    -- 3. Feed the key
-    if key then
-      local k = vim.api.nvim_replace_termcodes(key, true, false, true)
-      vim.api.nvim_feedkeys(k, "n", true)
-    end
-  end
-
-  -- Map all printable chars + Backspace
-  for i = 32, 126 do -- ASCII space to ~
-    local char = string.char(i)
-    vim.keymap.set("n", char, function() redirect_to_input(char) end, opts)
-  end
-  vim.keymap.set("n", "<BS>", function() redirect_to_input("<BS>") end, opts)
+  utils.setup_redirect_input(state.buf_list, function() return state.win_list end)
 end
 
 return M

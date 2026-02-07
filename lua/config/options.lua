@@ -7,37 +7,40 @@ vim.g._shell_cache = vim.g._shell_cache or (
 )
 vim.opt.shell = vim.g._shell_cache
 
-vim.opt.number = true
-vim.opt.relativenumber = true
-vim.opt.tabstop = 2
-vim.opt.shiftwidth = 2
-vim.opt.expandtab = true
-vim.opt.smartindent = true
-vim.opt.wrap = false
-vim.opt.cursorline = true
-vim.opt.termguicolors = true
-vim.opt.clipboard = "unnamedplus"
-vim.opt.ignorecase = true
-vim.opt.smartcase = true
-vim.opt.mouse = "a"
-vim.opt.splitbelow = true
-vim.opt.splitright = true
-vim.opt.scrolloff = 8
-vim.opt.signcolumn = "yes"
-vim.opt.completeopt = "menu,menuone,noinsert,noselect"
-vim.opt.undofile = true
-vim.opt.list = true
--- Ensure no dots for leading spaces ("lead" defaults to Space if not set, but let's be explicit)
+-- Editor options
+local opts = {
+  number         = true,
+  relativenumber = true,
+  tabstop        = 2,
+  shiftwidth     = 2,
+  expandtab      = true,
+  smartindent    = true,
+  wrap           = false,
+  cursorline     = true,
+  clipboard      = "unnamedplus",
+  ignorecase     = true,
+  smartcase      = true,
+  mouse          = "a",
+  splitbelow     = true,
+  splitright     = true,
+  scrolloff      = 8,
+  signcolumn     = "yes",
+  undofile       = true,
+  list           = true,
+  updatetime     = 500,
+}
+
+for k, v in pairs(opts) do
+  vim.opt[k] = v
+end
+
 vim.opt.listchars = { trail = "·", nbsp = "␣", tab = "  ", lead = " " }
 
--- LSP hover diagnostics delay
-vim.opt.updatetime = 500
-
 -- UI optimizations
-vim.opt.shortmess:append("I") -- Disable intro screen
+vim.opt.shortmess:append("I")
 vim.opt.fillchars = {
-  eob = " ",     -- Hide end-of-buffer tildes
-  fold = " ",    -- Fold character
-  diff = "╱",    -- Diff separator
-  vert = "│",    -- Vertical split
+  eob = " ",
+  fold = " ",
+  diff = "╱",
+  vert = "│",
 }
