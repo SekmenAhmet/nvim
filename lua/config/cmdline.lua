@@ -46,7 +46,7 @@ local function update_completion(cmd)
       row = row + 1, -- +1 purely relative to editor? No, row is absolute from editor top
       -- Actually, easier to make it relative to the cmdline win if supported, but editor relative is safer for positioning
       row = 2 + 3, -- Cmdline is at row 2, height 1 + border 2 = 3 offset
-      col = col[1], -- It returns an array sometimes? No, number.
+      col = col,
       style = "minimal",
       border = "rounded",
     })

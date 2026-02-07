@@ -276,14 +276,10 @@ end
 local function start_scan(on_update)
   state.files = {}
 
-  local cmd, args
-  if vim.fn.executable("rg") == 1 then
-    cmd = "rg"
-    args = { "--files", "--hidden", "--glob", "!.git/*", "--glob", "!node_modules/*", "--glob", "!__pycache__/*", "--glob", "!target/*", "--glob", "!.venv/*" }
-  else
-    cmd = "find"
-    args = { ".", "-type", "f" }
-  end
+  local cmd = vim.fn.executable("rg") == 1 and "rg" or "find"
+  local args = cmd == "rg" 
+    and { "--files", "--hidden", "--glob", "!.git/*", "--glob", "!node_modules/*", "--glob", "!__pycache__/*", "--glob", "!target/*", "--glob", "!.venv/*" }
+    or { ".", "-type", "f" }
 
   local stdout = uv.new_pipe(false)
   local stderr = uv.new_pipe(false)
@@ -373,9 +369,12 @@ function M.open()
 
   -- Actions
   local function close()
-    -- Stop preview timer
+    -- Stop and close preview timer
     if state.preview_timer then
       state.preview_timer:stop()
+      if not state.preview_timer:is_closing() then
+        state.preview_timer:close()
+      end
     end
     window.close_windows(state)
     -- WinClosed autocommand handles the rest

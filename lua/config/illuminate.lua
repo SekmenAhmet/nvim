@@ -101,7 +101,10 @@ vim.api.nvim_create_autocmd("VimLeave", {
   callback = function()
     if timer then
       timer:stop()
-      timer:close()
+      if not timer:is_closing() then
+        timer:close()
+      end
+      timer = nil
     end
   end,
 })

@@ -152,7 +152,7 @@ function M.toggle_mark()
     local pos = vim.api.nvim_get_mark(mark_char, {})
     if pos[1] == 0 then  -- Marque libre
       vim.cmd("mark " .. mark_char)
-      vim.notify("Marque '" .. mark_char .. " ajoutée", vim.log.levels.INFO)
+      vim.notify("Marque '" .. mark_char .. "' ajoutée", vim.log.levels.INFO)
       return
     end
   end

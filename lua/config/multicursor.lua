@@ -40,25 +40,6 @@ function M.select_next()
   end
 end
 
--- Méthode alternative: Utiliser cgn pour changer
--- * pour chercher, cgn pour changer et aller au prochain
-function M.setup_cgn()
-  -- * : cherche le mot sous le curseur
-  -- cgn : change et prépare pour le prochain
-  -- . : répète le changement
-  
-  -- Mapping optimisé
-  vim.keymap.set('n', '<C-n>', function()
-    -- Si pas de recherche en cours, initialiser
-    if vim.fn.getreg('/') == '' then
-      vim.cmd('normal! *')
-    else
-      -- Aller à l'occurrence suivante et changer
-      vim.cmd('normal! *Ncgn')
-    end
-  end, { desc = 'Change next occurrence' })
-end
-
 -- Méthode simple et efficace
 function M.setup_simple()
   -- <C-n> en mode normal: sélectionne le mot et met en recherche

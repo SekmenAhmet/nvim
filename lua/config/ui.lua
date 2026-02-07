@@ -98,7 +98,7 @@ function M.get_icon_data(filename)
   end
   
   local name = vim.fn.fnamemodify(filename, ":t")
-  local ext = name:match("^.+%.(.+)$")
+  local ext = filename:match("%.([^%.]+)$")
   local result
   
   -- Exact match first
@@ -124,30 +124,13 @@ function M.get_icon_data(filename)
 end
 
 -- UI Helpers (Select/Input) - kept from previous version
--- Helper to create a floating window centered
+-- Uses utils.create_centered_win for window creation
 local function create_win(width, height, title)
-  local cols = vim.o.columns
-  local lines = vim.o.lines
-  local row = math.floor((lines - height) / 2)
-  local col = math.floor((cols - width) / 2)
-
-  local buf = vim.api.nvim_create_buf(false, true)
-  local win = vim.api.nvim_open_win(buf, true, {
-    relative = "editor",
-    width = width,
+  return require("utils").create_centered_win({
+    width_pct = width / vim.o.columns,
     height = height,
-    row = row,
-    col = col,
-    style = "minimal",
-    border = "rounded",
-    title = title and (" " .. title .. " ") or nil,
-    title_pos = "left",
+    title = title,
   })
-
-  vim.wo[win].winhl = "NormalFloat:NormalFloat,FloatBorder:FloatBorder,CursorLine:Visual"
-  vim.wo[win].cursorline = true
-  
-  return buf, win
 end
 
 function M.select(items, opts, on_choice)
@@ -168,7 +151,8 @@ function M.select(items, opts, on_choice)
   width = math.min(width + 4, math.floor(vim.o.columns * 0.8))
   local height = math.min(#choices, math.floor(vim.o.lines * 0.8))
 
-  local buf, win = create_win(width, height, opts.prompt or "Select")
+  local win_info = create_win(width, height, opts.prompt or "Select")
+  local buf, win = win_info.buf, win_info.win
   vim.api.nvim_buf_set_lines(buf, 0, -1, false, choices)
   
   local function close() if vim.api.nvim_win_is_valid(win) then vim.api.nvim_win_close(win, true) end end
@@ -191,7 +175,8 @@ function M.input(opts, on_confirm)
   local width = math.floor(vim.o.columns * 0.4)
   local height = 1
 
-  local buf, win = create_win(width, height, prompt:gsub(":$", ""))
+  local win_info = create_win(width, height, prompt:gsub(":$", ""))
+  local buf, win = win_info.buf, win_info.win
   vim.api.nvim_buf_set_lines(buf, 0, -1, false, { default })
   vim.bo[buf].buftype = "nofile"
   

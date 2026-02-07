@@ -125,25 +125,6 @@ function M.create_dual_pane(opts)
 end
 
 -- =============================================================================
--- TIMER UTILITIES
--- =============================================================================
-
--- Create a debounced function
--- @param ms number: debounce delay in milliseconds
--- @param fn function: function to debounce
--- @return function: debounced function
-function M.debounce(ms, fn)
-  local timer = vim.uv.new_timer()
-  return function(...)
-    local args = {...}
-    timer:stop()
-    timer:start(ms, 0, vim.schedule_wrap(function()
-      fn(unpack(args))
-    end))
-  end
-end
-
--- =============================================================================
 -- STATE UTILITIES
 -- =============================================================================
 
@@ -191,20 +172,6 @@ function M.create_state()
       self.timers = {}
     end
   }
-end
-
--- =============================================================================
--- STRING UTILITIES
--- =============================================================================
-
--- Trim trailing whitespace from buffer
--- Uses native vim command for performance
--- @param bufnr number: buffer number (default: current buffer)
-function M.trim_trailing_whitespace(bufnr)
-  bufnr = bufnr or api.nvim_get_current_buf()
-  api.nvim_buf_call(bufnr, function()
-    vim.cmd([[keeppatterns %s/\s\+$//e]])
-  end)
 end
 
 return M
