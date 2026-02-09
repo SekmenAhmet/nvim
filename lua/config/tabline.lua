@@ -111,6 +111,6 @@ vim.api.nvim_create_autocmd({ "BufAdd", "BufDelete", "BufEnter" }, {
 
 -- Activer la tabline
 vim.opt.showtabline = 2
-vim.opt.tabline = "%!luaeval('require(\"config.tabline\").render()')"
+vim.opt.tabline = "%!v:lua.require'config.tabline'.render()"
 
 return M

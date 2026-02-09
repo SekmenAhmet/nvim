@@ -323,8 +323,6 @@ function M.toggle()
       local new_name = vim.fn.input("Rename: ", item.path)
       if new_name ~= "" and new_name ~= item.path then vim.fn.rename(item.path, new_name); draw_impl() end
   end)
-  map("<C-l>", "<C-w>l")
-  map("<C-h>", "<C-w>h")
 end
 
 -- Augroup for tree autocommands

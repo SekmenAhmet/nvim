@@ -81,6 +81,7 @@ vim.keymap.set("n", "<leader>fg", utils.lazy_require("config.grep", "open"), { d
 vim.keymap.set("n", "/", utils.lazy_require("config.search", "open"), { desc = "Search in file (Native)" })
 vim.keymap.set({"n", "v"}, ":", utils.lazy_require("config.cmdline", "open"), { desc = "Command Line (Native)" })
 vim.keymap.set({"n", "i"}, "<C-p>", utils.lazy_require("config.rest", "open"), { desc = "Open REST Client" })
+vim.keymap.set({"n", "i"}, "<C-d>", utils.lazy_require("config.docker", "toggle"), { desc = "Open Docker Client" })
 vim.keymap.set({"n", "i", "t"}, "<C-t>", utils.lazy_require("config.terminal", "toggle"), { desc = "Toggle terminal" })
 vim.keymap.set({"n", "i", "v"}, "<C-b>", utils.lazy_require("config.netrw", "toggle"), { silent = true, desc = "Toggle file tree" })
 vim.keymap.set({"n", "i", "t"}, "<C-g>", utils.lazy_require("config.git", "toggle"), { desc = "Toggle Git Dashboard" })

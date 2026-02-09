@@ -253,4 +253,214 @@ function M.lazy_require(module, fn)
   end
 end
 
+-- =============================================================================
+-- UI MODE UTILITIES (Strict Mode)
+-- =============================================================================
+
+-- Configure a buffer for strict UI mode (read-only list behavior)
+-- @param buf number: buffer to configure
+-- @param opts table: { win = number, enter_fn = function }
+function M.set_ui_mode(buf, opts)
+  opts = opts or {}
+  
+  -- Visuals
+  vim.bo[buf].buftype = "nofile"
+  vim.bo[buf].modifiable = false
+  if opts.win and api.nvim_win_is_valid(opts.win) then
+    vim.wo[opts.win].cursorline = true
+    vim.wo[opts.win].number = false
+    vim.wo[opts.win].relativenumber = false
+  end
+
+  local map_opts = { buffer = buf, silent = true, nowait = true }
+
+  -- Block Editing Keys
+  local banned = { "i", "I", "a", "A", "o", "O", "c", "C", "d", "D", "x", "X", "p", "P", "s", "S", "r", "R" }
+  for _, k in ipairs(banned) do
+    vim.keymap.set({"n", "v"}, k, "<Nop>", map_opts)
+  end
+
+  -- Navigation
+  vim.keymap.set("n", "j", "j", map_opts)
+  vim.keymap.set("n", "k", "k", map_opts)
+  vim.keymap.set("n", "<Down>", "j", map_opts)
+  vim.keymap.set("n", "<Up>", "k", map_opts)
+  vim.keymap.set("n", "<Left>", "h", map_opts)
+  vim.keymap.set("n", "<Right>", "l", map_opts)
+  
+  -- Actions
+  if opts.enter_fn then
+    vim.keymap.set("n", "<CR>", opts.enter_fn, map_opts)
+  end
+end
+
+-- Setup list navigation for Finder/Grep (Mixed Input + List)
+-- Handles seamless transition between Input (Line 1) and List (Line 2+)
+-- @param buf number
+-- @param win number
+-- @param list_start_line number: 1-based index where list starts (usually 2 or 3)
+function M.setup_list_navigation(buf, win, list_start_line)
+  local map_opts = { buffer = buf, silent = true }
+  list_start_line = list_start_line or 2
+
+  local function nav(dir)
+    if vim.api.nvim_get_mode().mode == 'i' then vim.cmd("stopinsert") end
+    
+    local current_row = api.nvim_win_get_cursor(win)[1]
+    local line_count = api.nvim_buf_line_count(buf)
+    local target = current_row + dir
+
+    -- If currently in input (row 1) and going down, jump to list start
+    if current_row == 1 and dir > 0 then
+      target = list_start_line
+    end
+
+    -- If in list start and going up, jump to input
+    if current_row <= list_start_line and dir < 0 then
+      api.nvim_win_set_cursor(win, {1, 0})
+      vim.cmd("startinsert")
+      -- Move cursor to end of input line
+      local line = api.nvim_buf_get_lines(buf, 0, 1, false)[1]
+      api.nvim_win_set_cursor(win, {1, #line})
+      return
+    end
+
+    -- Boundary checks
+    if target < list_start_line then target = list_start_line end
+    if target > line_count then target = line_count end
+
+    -- Only move if valid
+    if target >= list_start_line and target <= line_count then
+      api.nvim_win_set_cursor(win, {target, 0})
+    end
+  end
+
+  -- Mappings for both Normal and Insert modes
+  vim.keymap.set({"n", "i"}, "<Down>", function() nav(1) end, map_opts)
+  vim.keymap.set({"n", "i"}, "<Up>", function() nav(-1) end, map_opts)
+  vim.keymap.set({"n", "i"}, "<C-j>", function() nav(1) end, map_opts)
+  vim.keymap.set({"n", "i"}, "<C-k>", function() nav(-1) end, map_opts)
+  
+  -- Pure Normal mode j/k (if user escapes input)
+  vim.keymap.set("n", "j", function() nav(1) end, map_opts)
+  vim.keymap.set("n", "k", function() nav(-1) end, map_opts)
+end
+
+-- Async Preview Generator
+-- Uses libuv to read file content without blocking the UI
+-- @param filepath string
+-- @param buf_preview number
+-- @param win_preview number
+-- @param opts table: { lnum = number, timer = uv_timer, cache = table, on_loaded = function }
+function M.async_preview(filepath, buf_preview, win_preview, opts)
+  opts = opts or {}
+  if not filepath or filepath == "" or not api.nvim_buf_is_valid(buf_preview) then
+    if api.nvim_buf_is_valid(buf_preview) then
+      api.nvim_buf_set_lines(buf_preview, 0, -1, false, {})
+    end
+    return
+  end
+
+  local lnum = tonumber(opts.lnum) or 1
+  local key = filepath .. ":" .. lnum
+  
+  -- Cache Check
+  if opts.cache and opts.cache[key] then
+    local c = opts.cache[key]
+    vim.schedule(function()
+      if not api.nvim_buf_is_valid(buf_preview) then return end
+      api.nvim_buf_set_lines(buf_preview, 0, -1, false, c.lines)
+      if c.ft then vim.bo[buf_preview].filetype = c.ft end
+      if win_preview and api.nvim_win_is_valid(win_preview) then
+        pcall(api.nvim_win_set_cursor, win_preview, {c.relative_lnum or 1, 0})
+        api.nvim_win_call(win_preview, function() vim.cmd("normal! zz") end)
+      end
+      if opts.on_loaded then opts.on_loaded(c.relative_lnum) end
+    end)
+    return
+  end
+
+  -- Debounce Timer
+  if opts.timer then
+    opts.timer:stop()
+    opts.timer:start(5, 0, vim.schedule_wrap(function()
+      M._do_preview_read(filepath, buf_preview, win_preview, lnum, key, opts)
+    end))
+  else
+    M._do_preview_read(filepath, buf_preview, win_preview, lnum, key, opts)
+  end
+end
+
+-- Internal reader logic
+function M._do_preview_read(filepath, buf, win, lnum, key, opts)
+  if not api.nvim_buf_is_valid(buf) then return end
+  
+  local uv = vim.uv
+  local stat = uv.fs_stat(filepath)
+  if not stat or stat.type ~= "file" then
+    api.nvim_buf_set_lines(buf, 0, -1, false, { " [File not found or Directory] " })
+    return
+  end
+
+  -- Optimization: Context reading
+  local context = 50
+  local avg_line = 100
+  local max_read = context * 2 * avg_line
+  
+  local size = stat.size
+  local offset = 0
+  local truncated = false
+  
+  if size > max_read then
+    truncated = true
+    offset = math.max(0, (lnum - context) * avg_line)
+    -- Align offset (heuristic)
+    if offset > 0 then offset = math.max(0, offset - avg_line) end
+    size = math.min(max_read, stat.size - offset)
+  end
+
+  uv.fs_open(filepath, "r", 438, function(err, fd)
+    if err then return end
+    uv.fs_read(fd, size, offset, function(read_err, data)
+      uv.fs_close(fd)
+      if read_err then return end
+      
+      vim.schedule(function()
+        if not api.nvim_buf_is_valid(buf) then return end
+        local lines = vim.split(data or "", "\n")
+        
+        -- Calculate relative line number
+        local rel_lnum = lnum
+        if truncated then
+          -- Simple heuristic: middle of the chunk is roughly our target
+          rel_lnum = math.floor(#lines / 2)
+          -- Ensure it's valid
+          if rel_lnum < 1 then rel_lnum = 1 end
+          if rel_lnum > #lines then rel_lnum = #lines end
+        else
+          if rel_lnum > #lines then rel_lnum = #lines end
+        end
+        if rel_lnum < 1 then rel_lnum = 1 end
+
+        local ft = vim.filetype.match({ filename = filepath })
+        
+        -- Cache result
+        if opts.cache then
+          opts.cache[key] = { lines = lines, ft = ft, relative_lnum = rel_lnum }
+        end
+
+        api.nvim_buf_set_lines(buf, 0, -1, false, lines)
+        if ft then vim.bo[buf].filetype = ft end
+        
+        if win and api.nvim_win_is_valid(win) then
+          pcall(api.nvim_win_set_cursor, win, {rel_lnum, 0})
+          api.nvim_win_call(win, function() vim.cmd("normal! zz") end)
+        end
+        
+        if opts.on_loaded then opts.on_loaded(rel_lnum) end
+      end)
+    end)
+  end)
+end
+
 return M

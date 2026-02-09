@@ -106,7 +106,7 @@ function M.render()
   )
 end
 
-vim.opt.statusline = "%!luaeval('require(\"config.statusline\").render()')"
+vim.opt.statusline = "%!v:lua.require'config.statusline'.render()"
 vim.opt.laststatus = 3
 
 return M

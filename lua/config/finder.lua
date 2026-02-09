@@ -97,67 +97,10 @@ end
 
 -- 1. Preview Logic
 local function update_preview(filepath)
-  if not filepath or filepath == "" then
-    if vim.api.nvim_buf_is_valid(state.buf_preview) then
-       vim.api.nvim_buf_set_lines(state.buf_preview, 0, -1, false, {})
-    end
-    return
-  end
-
-  if state.last_preview_file == filepath then return end
-  state.last_preview_file = filepath
-
-  state.preview_timer:stop()
-  state.preview_timer:start(5, 0, vim.schedule_wrap(function()
-    if not vim.api.nvim_buf_is_valid(state.buf_preview) then return end
-
-    local stat = uv.fs_stat(filepath)
-    if not stat or stat.type ~= "file" then
-      vim.api.nvim_buf_set_lines(state.buf_preview, 0, -1, false, { " [Directory or Not Found] " })
-      return
-    end
-
-    if stat.size > 200 * 1024 then
-      vim.api.nvim_buf_set_lines(state.buf_preview, 0, -1, false, { " [File too large] " })
-      return
-    end
-
-    uv.fs_open(filepath, "r", 438, function(err, fd)
-      if err then
-        vim.schedule(function()
-          if vim.api.nvim_buf_is_valid(state.buf_preview) then
-            vim.api.nvim_buf_set_lines(state.buf_preview, 0, -1, false, { " [Cannot read file: " .. tostring(err) .. "] " })
-          end
-        end)
-        return
-      end
-      uv.fs_read(fd, 4096, 0, function(err_read, data)
-        uv.fs_close(fd)
-        if err_read then
-          vim.schedule(function()
-            if vim.api.nvim_buf_is_valid(state.buf_preview) then
-              vim.api.nvim_buf_set_lines(state.buf_preview, 0, -1, false, { " [Read error: " .. tostring(err_read) .. "] " })
-            end
-          end)
-          return
-        end
-
-        vim.schedule(function()
-          if not vim.api.nvim_buf_is_valid(state.buf_preview) then return end
-          local lines = vim.split(data or "", "\n")
-          if #lines > 100 then lines = { unpack(lines, 1, 100) } end
-
-          vim.api.nvim_buf_set_lines(state.buf_preview, 0, -1, false, lines)
-
-          -- Enhanced Filetype Detection
-          local ft = vim.filetype.match({ filename = filepath })
-          if ft then
-            vim.bo[state.buf_preview].filetype = ft
-          end
-        end)
-      end)
-    end)
-  end))
+  utils.async_preview(filepath, state.buf_preview, state.win_preview, {
+    timer = state.preview_timer,
+    cache = nil -- Finder usually doesn't need heavy caching as we move fast, but we could add it
+  })
 end
 
 -- 2. Create UI
@@ -391,23 +334,8 @@ function M.open()
   vim.keymap.set({"i", "n"}, "<Esc>", close, opts)
   vim.keymap.set({"i", "n"}, "<CR>", open_file, opts)
 
-  -- Navigation
-  vim.keymap.set("i", "<Down>", function()
-    vim.cmd("stopinsert")
-    vim.api.nvim_win_set_cursor(state.win_list, {3, 0})
-  end, opts)
-
-  vim.keymap.set("n", "<Up>", function()
-    local cursor = vim.api.nvim_win_get_cursor(state.win_list)
-    if cursor[1] <= 3 then
-      vim.api.nvim_win_set_cursor(state.win_list, {1, 0})
-      vim.cmd("startinsert")
-      local line = vim.api.nvim_buf_get_lines(state.buf_list, 0, 1, false)[1]
-      vim.api.nvim_win_set_cursor(state.win_list, {1, #line})
-    else
-      vim.cmd("normal! k")
-    end
-  end, opts)
+  -- Navigation (Unified & Strict)
+  utils.setup_list_navigation(state.buf_list, state.win_list, 3)
 
   -- AUTO-REDIRECT INPUT: Type anywhere to search
   utils.setup_redirect_input(state.buf_list, function() return state.win_list end)

@@ -174,24 +174,41 @@ end
 local function parse_status(raw)
   state.files = {}
   local lines = vim.split(raw, "\n", { trimempty = true })
+  
+  -- Liste d'exclusion (Regex patterns)
+  local exclude_patterns = {
+    "^%.git/", "%.gitignore", "%.env", "node_modules/", 
+    "^dist/", "^build/", "^target/", "^bin/", "^out/",
+    "package%-lock%.json", "yarn%.lock", "pnpm%-lock%.yaml", "composer%.lock",
+    "%.cache/", "%.tmp/", "%.DS_Store"
+  }
+
   for _, line in ipairs(lines) do
     local status_code = line:sub(1, 2)
     local path = line:sub(4)
     
-    -- Filter out .gitignore and .git
-    if not (path == ".gitignore" or path:match("^%.git/")) then
+    local skip = false
+    for _, pattern in ipairs(exclude_patterns) do
+      if path:match(pattern) then skip = true break end
+    end
+
+    if not skip then
       if status_code:match("R") then 
         local arrow = path:find(" -> ")
         if arrow then path = path:sub(arrow + 4) end
       end
+      
       local type = "modified"
       local s1, s2 = status_code:sub(1,1), status_code:sub(2,2)
+      
       if s1 == "?" then type = "untracked"
       elseif s1 == "A" or s2 == "A" then type = "added"
       elseif s1 == "D" or s2 == "D" then type = "deleted" 
       end
+      
       local is_staged = (s1 ~= " " and s1 ~= "?")
       local icon_data = ui.get_icon_data(path)
+      
       table.insert(state.files, {
         path = path, status = status_code, staged = is_staged,
         type = type, icon = icon_data.icon, hl = icon_data.hl
@@ -467,13 +484,13 @@ local function action_generate_commit_msg()
   if not state.bufs.commit or not api.nvim_buf_is_valid(state.bufs.commit) then return end
   
   -- Check if there are staged changes
-  local has_staged = false
+  local staged_files = {}
   for _, f in ipairs(state.files) do
-    if f.staged then has_staged = true break end
+    if f.staged then table.insert(staged_files, f.path) end
   end
   
-  if not has_staged then
-    vim.notify("No staged changes to generate message from", vim.log.levels.WARN)
+  if #staged_files == 0 then
+    vim.notify("No staged changes [x]. Stage some files first!", vim.log.levels.WARN)
     return
   end
   
@@ -484,32 +501,41 @@ local function action_generate_commit_msg()
     return
   end
   
-  vim.notify("🤖 Generating commit message with AI...", vim.log.levels.INFO)
+  vim.notify("🤖 Analyzing " .. #staged_files .. " staged files...", vim.log.levels.INFO)
   
-  -- Get staged diff
-  git({ "diff", "--cached", "--no-color" }, function(diff_output)
+  -- Get staged diff ONLY for the files we are actually committing
+  -- This ensures the AI doesn't get confused by other staged changes if any
+  local diff_args = { "diff", "--cached", "--no-color", "--" }
+  for _, p in ipairs(staged_files) do table.insert(diff_args, p) end
+
+  git(diff_args, function(diff_output)
     if not diff_output or diff_output:match("^%s*$") then
-      vim.notify("No diff to analyze", vim.log.levels.WARN)
+      vim.notify("No diff found for staged files", vim.log.levels.WARN)
       return
     end
     
-    -- Limit diff size
+    -- Limit diff size to avoid context overflow
     local diff_lines = vim.split(diff_output, "\n")
     if #diff_lines > CONFIG.ai.max_diff_lines then
       diff_lines = { unpack(diff_lines, 1, CONFIG.ai.max_diff_lines) }
-      table.insert(diff_lines, "\n... (diff truncated)")
+      table.insert(diff_lines, "\n... (diff truncated for brevity)")
     end
     local diff = table.concat(diff_lines, "\n")
     
-    -- Prepare prompt
-    local prompt = [[Analyze this git diff and generate a concise, conventional commit message (50 chars max for first line).
-Follow format: type(scope): description
+    -- Prepare professional prompt
+    local prompt = string.format([[You are an expert developer. Generate a concise conventional commit message for these changes.
+Files affected: %s
 
-Types: feat, fix, docs, style, refactor, test, chore
-Be specific and technical. Only output the commit message, nothing else.
+Format: <type>(<scope>): <description>
+
+Types: feat, fix, docs, style, refactor, test, chore.
+Scope: Optional, usually the main module/file affected.
+Description: technical, active voice, 50 chars max.
+
+Only output the message. No preamble.
 
 Diff:
-]] .. diff
+%s]], table.concat(staged_files, ", "), diff)
     
     -- Create temp file for payload (safer than shell escaping)
     local tmpfile = os.tmpname()
@@ -760,6 +786,19 @@ local function setup_buffer_maps(buf, pane)
   map("n", CONFIG.mappings.refresh, refresh)
   map("n", CONFIG.mappings.toggle_log, toggle_log_window) -- Buffer-local!
   
+  -- Strict Mode: Block modification keys in non-commit buffers
+  if pane ~= "commit" then
+    local banned = { "i", "I", "a", "A", "o", "O", "c", "C", "d", "D", "x", "X", "p", "P", "s", "r" } 
+    -- Note: 's' is staged in 'files', so strict mode must be applied BEFORE specific actions override it?
+    -- Actually map() uses vim.keymap.set. If we set <Nop> now, specific actions later will override it correctly.
+    -- EXCEPT 'S' (Stage All) and 's' (Stage) in files.
+    
+    for _, key in ipairs(banned) do
+      map("n", key, "<Nop>")
+      map("v", key, "<Nop>") -- Also block visual mode ops
+    end
+  end
+
   -- Navigation
   map("n", CONFIG.mappings.nav_right, function() api.nvim_set_current_win(state.wins.preview) end)
   map("n", CONFIG.mappings.nav_left, function() api.nvim_set_current_win(state.wins.commit); state.active_pane = "commit" end)

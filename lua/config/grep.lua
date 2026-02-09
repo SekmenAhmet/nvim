@@ -52,125 +52,18 @@ end
 
 -- 1. Preview Logic
 local function update_preview(filename, lnum)
-  if not filename or filename == "" then
-     if vim.api.nvim_buf_is_valid(state.buf_preview) then
-       vim.api.nvim_buf_set_lines(state.buf_preview, 0, -1, false, {})
-     end
-     return
-  end
   lnum = tonumber(lnum) or 1
-  local key = filename .. ":" .. lnum
-  if state.last_preview_key == key then return end
-  state.last_preview_key = key
-
-  -- 1. Check Cache first
-  if state.preview_cache[key] then
-    local cached = state.preview_cache[key]
-    vim.schedule(function()
-      if not vim.api.nvim_buf_is_valid(state.buf_preview) then return end
-      vim.api.nvim_buf_set_lines(state.buf_preview, 0, -1, false, cached.lines)
-      if cached.ft then vim.bo[state.buf_preview].filetype = cached.ft end
-      pcall(vim.api.nvim_win_set_cursor, state.win_preview, {cached.relative_lnum, 0})
-      vim.api.nvim_win_call(state.win_preview, function() vim.cmd("normal! zz") end)
+  utils.async_preview(filename, state.buf_preview, state.win_preview, {
+    lnum = lnum,
+    timer = state.timer_preview,
+    cache = state.preview_cache,
+    on_loaded = function(rel_lnum)
+      -- Apply search highlight
       local ns = vim.api.nvim_create_namespace("grep_preview")
       vim.api.nvim_buf_clear_namespace(state.buf_preview, ns, 0, -1)
-      vim.api.nvim_buf_add_highlight(state.buf_preview, ns, "Search", cached.relative_lnum - 1, 0, -1)
-    end)
-    return
-  end
-
-  state.timer_preview:stop()
-  state.timer_preview:start(5, 0, vim.schedule_wrap(function()
-    if not vim.api.nvim_buf_is_valid(state.buf_preview) then return end
-    local stat = uv.fs_stat(filename)
-    if not stat or stat.type ~= "file" then
-      vim.api.nvim_buf_set_lines(state.buf_preview, 0, -1, false, { " [File not found] " })
-      return
+      vim.api.nvim_buf_add_highlight(state.buf_preview, ns, "Search", rel_lnum - 1, 0, -1)
     end
-
-    -- OPTIMISATION : Limiter la lecture aux lignes contextuelles
-    local context_lines = 50  -- 50 avant + 50 après = 100 lignes max
-    local line_length_estimate = 100
-    local max_read_size = context_lines * 2 * line_length_estimate  -- ~10KB
-    
-    local read_size = stat.size
-    local offset = 0
-    local is_truncated = false
-    
-    -- Si fichier gros, lire seulement le contexte
-    if stat.size > max_read_size then
-      is_truncated = true
-      -- Estimation grossière : lnum * taille_moyenne_ligne
-      offset = math.max(0, (lnum - context_lines) * line_length_estimate)
-      read_size = math.min(max_read_size, stat.size - offset)
-      
-      -- Aligner sur le début d'une ligne
-      if offset > 0 then
-        offset = math.max(0, offset - line_length_estimate)
-        read_size = math.min(max_read_size + line_length_estimate, stat.size - offset)
-      end
-    end
-
-    uv.fs_open(filename, "r", 438, function(err, fd)
-      if err then
-        vim.schedule(function()
-          if vim.api.nvim_buf_is_valid(state.buf_preview) then
-            vim.api.nvim_buf_set_lines(state.buf_preview, 0, -1, false, { " [Cannot open file: " .. tostring(err) .. "] " })
-          end
-        end)
-        return
-      end
-      uv.fs_read(fd, read_size, offset, function(err_read, data)
-        uv.fs_close(fd)
-        if err_read then
-          vim.schedule(function()
-            if vim.api.nvim_buf_is_valid(state.buf_preview) then
-              vim.api.nvim_buf_set_lines(state.buf_preview, 0, -1, false, { " [Read error: " .. tostring(err_read) .. "] " })
-            end
-          end)
-          return
-        end
-        vim.schedule(function()
-          if not vim.api.nvim_buf_is_valid(state.buf_preview) then return end
-          local lines = vim.split(data or "", "\n")
-          
-          -- Calculer la ligne relative dans le contexte lu
-          local relative_lnum = lnum
-          if is_truncated then
-            relative_lnum = math.min(context_lines + 1, #lines)
-            for i, line in ipairs(lines) do
-              if i > 1 and i < #lines then
-                if i >= context_lines - 5 and i <= context_lines + 5 then
-                  relative_lnum = i
-                  break
-                end
-              end
-            end
-          end
-          relative_lnum = math.max(1, math.min(relative_lnum, #lines))
-          
-          local ft = vim.filetype.match({ filename = filename })
-          
-          -- Save to Cache
-          state.preview_cache[key] = {
-            lines = lines,
-            ft = ft,
-            relative_lnum = relative_lnum
-          }
-
-          vim.api.nvim_buf_set_lines(state.buf_preview, 0, -1, false, lines)
-          if ft then vim.bo[state.buf_preview].filetype = ft end
-
-          pcall(vim.api.nvim_win_set_cursor, state.win_preview, {relative_lnum, 0})
-          vim.api.nvim_win_call(state.win_preview, function() vim.cmd("normal! zz") end)
-
-          local ns = vim.api.nvim_create_namespace("grep_preview")
-          vim.api.nvim_buf_clear_namespace(state.buf_preview, ns, 0, -1)
-          vim.api.nvim_buf_add_highlight(state.buf_preview, ns, "Search", relative_lnum - 1, 0, -1)
-        end)
-      end)
-    end)
-  end))
+  })
 end
 
 -- 2. Render List (Grouped by File)
@@ -445,48 +338,8 @@ function M.open()
   vim.keymap.set({"i", "n"}, "<Esc>", close, opts)
   vim.keymap.set({"i", "n"}, "<CR>", open_result, opts)
 
-  local function navigate(dir)
-    vim.cmd("stopinsert")
-    if vim.tbl_isempty(state.line_map) then return end
-
-    local current_row = vim.api.nvim_win_get_cursor(state.win_list)[1]
-    local line_count = vim.api.nvim_buf_line_count(state.buf_list)
-
-    local target_row
-    if current_row == 1 and dir > 0 then
-      target_row = 3
-    else
-      target_row = current_row + dir
-    end
-
-    if target_row < 3 then target_row = 3 end
-    if target_row > line_count then target_row = line_count end
-
-    local steps = 0
-    while not state.line_map[target_row] and target_row < line_count and target_row >= 3 and steps < 100 do
-      target_row = target_row + dir
-      steps = steps + 1
-    end
-
-    if state.line_map[target_row] then
-       vim.api.nvim_win_set_cursor(state.win_list, {target_row, 0})
-    end
-  end
-
-  vim.keymap.set("i", "<Down>", function() navigate(1) end, opts)
-  vim.keymap.set("n", "<Down>", function() navigate(1) end, opts)
-  vim.keymap.set("n", "<Up>", function() navigate(-1) end, opts)
-  vim.keymap.set("i", "<Up>", function()
-    local row = vim.api.nvim_win_get_cursor(state.win_list)[1]
-    if row <= 3 then
-      vim.api.nvim_win_set_cursor(state.win_list, {1, 0})
-      vim.cmd("startinsert")
-      local line = vim.api.nvim_buf_get_lines(state.buf_list, 0, 1, false)[1]
-      vim.api.nvim_win_set_cursor(state.win_list, {1, #line})
-    else
-      navigate(-1)
-    end
-  end, opts)
+  -- Navigation (Unified & Strict)
+  utils.setup_list_navigation(state.buf_list, state.win_list, 3)
 
   -- AUTO-REDIRECT INPUT: Type anywhere to search
   utils.setup_redirect_input(state.buf_list, function() return state.win_list end)
