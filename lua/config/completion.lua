@@ -29,18 +29,27 @@ local function check_trigger()
   end
 end
 
--- Timer unique avec debounce
+-- Timer Singleton (Optimisation GC)
+-- On réutilise le même timer pour éviter les allocations répétées à chaque frappe
+local completion_timer = nil
+-- Protection Hot-Reload
+local _reg_name = "_completion_timer_singleton"
+if rawget(_G, _reg_name) then
+  local old = rawget(_G, _reg_name)
+  if not old:is_closing() then old:stop(); old:close() end
+end
+
+completion_timer = vim.uv.new_timer()
+rawset(_G, _reg_name, completion_timer)
+
 local completion_augroup = vim.api.nvim_create_augroup("NativeCompletion", { clear = true })
--- Guard for hot-reload: cleanup previous timer via registry
-local _reg = rawget(_G, "_completion_timer")
-if _reg then pcall(function() _reg:stop(); _reg:close() end) end
-local timer = vim.uv.new_timer()
-rawset(_G, "_completion_timer", timer)
+
 vim.api.nvim_create_autocmd("TextChangedI", {
   group = completion_augroup,
   callback = function()
-    timer:stop()
-    timer:start(150, 0, vim.schedule_wrap(check_trigger))
+    -- Debounce de 150ms
+    completion_timer:stop()
+    completion_timer:start(150, 0, vim.schedule_wrap(check_trigger))
   end
 })
 
@@ -48,10 +57,9 @@ vim.api.nvim_create_autocmd("TextChangedI", {
 vim.api.nvim_create_autocmd("VimLeave", {
   group = completion_augroup,
   callback = function()
-    if timer then
-      timer:stop()
-      timer:close()
-      timer = nil
+    if completion_timer and not completion_timer:is_closing() then
+      completion_timer:stop()
+      completion_timer:close()
     end
   end,
 })

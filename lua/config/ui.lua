@@ -85,14 +85,14 @@ function M.setup()
   vim.api.nvim_set_hl(0, "IconDirOpen", { fg = "#9ece6a" }) -- Open Folder color (Greenish)
 end
 
--- Simple LRU cache for icon lookups
+-- Optimized Icon Cache (High Capacity)
 local icon_cache = {}
 local cache_size = 0
-local max_cache_size = 100
+-- 500 entrées est un compromis idéal mémoire/hit-rate
+local max_cache_size = 500 
 
 -- Return { icon = "...", hl = "Icon..." }
 function M.get_icon_data(filename)
-  -- Check cache first
   if icon_cache[filename] then
     return icon_cache[filename]
   end
@@ -111,7 +111,8 @@ function M.get_icon_data(filename)
     result = { icon = "", hl = "IconDefault" }
   end
   
-  -- Simple cache eviction (FIFO)
+  -- Si plein, on vide tout (Strategy "Trash Can"). 
+  -- Pour des icônes (donnée dérivée peu coûteuse), c'est plus performant que de maintenir une LRU list en Lua pur.
   if cache_size >= max_cache_size then
     icon_cache = {}
     cache_size = 0

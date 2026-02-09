@@ -26,6 +26,7 @@ if vim.loader then vim.loader.enable() end
 require("config.options")
 require("config.colors").setup() -- Load Theme immediately
 require("config.lazy")
+require("config.autocmds") -- Must be loaded before UI/Buffers events
 require("config.keymaps") -- Keymaps now handle lazy loading triggers
 require("config.moves")
 require("config.statusline")
@@ -36,7 +37,6 @@ vim.schedule(function()
   -- Still load these as they might have autocommands or setup
   local ui_mod = require("config.ui")
   ui_mod.setup()
-  require("config.autocmds")
   
   -- Load new modules (illuminate, marks, multicursor have autocommands)
   require("config.illuminate")

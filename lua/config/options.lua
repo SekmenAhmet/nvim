@@ -27,7 +27,7 @@ local opts = {
   signcolumn     = "yes",
   undofile       = true,
   list           = true,
-  updatetime     = 500,
+  updatetime     = 250,
 }
 
 for k, v in pairs(opts) do

@@ -17,12 +17,13 @@ vim.keymap.set({"n", "i", "v"}, "<C-s>", "<cmd>w<CR>", { silent = true, desc = "
 vim.keymap.set("n", "<Tab>", ":bnext<CR>", { silent = true, desc = "Next Buffer" })
 vim.keymap.set("n", "<S-Tab>", ":bprev<CR>", { silent = true, desc = "Previous Buffer" })
 
--- Smart Buffer Delete avec gestion des cas edge
+-- Smart Buffer Delete (Robust Version)
 local function smart_buffer_delete()
   local buf = vim.api.nvim_get_current_buf()
-  
+  local buftype = vim.bo[buf].buftype
+
   -- 1. Terminal : Force delete
-  if vim.bo[buf].buftype == "terminal" then
+  if buftype == "terminal" then
     vim.cmd("bdelete! " .. buf)
     return
   end
@@ -37,18 +38,35 @@ local function smart_buffer_delete()
     end
   end
   
-  -- 3. Navigation : Try Alt (#) -> Next -> New
+  -- 3. Detach buffer from all windows to avoid closing splits
+  -- Trouver le prochain buffer à afficher (Alternate ou Previous ou New)
   local alt = vim.fn.bufnr("#")
-  if alt ~= -1 and alt ~= buf and vim.fn.buflisted(alt) == 1 then
-    vim.api.nvim_set_current_buf(alt)
-  else
-    vim.cmd("bnext")
-    if vim.api.nvim_get_current_buf() == buf then
-      vim.cmd("enew") -- Dernier buffer
+  local next_buf = (alt ~= -1 and alt ~= buf and vim.fn.buflisted(alt) == 1) and alt or nil
+  
+  if not next_buf then
+    -- Essayer le buffer précédent dans la liste
+    local listed_bufs = vim.fn.getbufinfo({buflisted=1})
+    for _, b in ipairs(listed_bufs) do
+      if b.bufnr ~= buf then
+        next_buf = b.bufnr
+        break
+      end
     end
   end
   
-  -- 4. Delete
+  -- S'il n'y a pas d'autre buffer, on en crée un vide
+  if not next_buf then
+    next_buf = vim.api.nvim_create_buf(true, false) 
+  end
+
+  -- Parcourir toutes les fenêtres qui affichent le buffer cible
+  for _, win in ipairs(vim.api.nvim_list_wins()) do
+    if vim.api.nvim_win_get_buf(win) == buf then
+      vim.api.nvim_win_set_buf(win, next_buf)
+    end
+  end
+  
+  -- 4. Delete safely
   if vim.api.nvim_buf_is_valid(buf) then
     pcall(vim.cmd, "bdelete! " .. buf)
   end
