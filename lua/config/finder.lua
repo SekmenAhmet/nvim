@@ -371,7 +371,7 @@ function M.open()
   local function close()
     -- Cleanup timers safely
     utils.cleanup_timers({ state.preview_timer })
-    window.close_windows(state)
+    utils.close_windows(state)
     -- WinClosed autocommand handles the rest
   end
 

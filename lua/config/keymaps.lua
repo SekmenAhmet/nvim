@@ -3,7 +3,7 @@ local utils = require("utils")
 -- Navigation entre fenêtres : Ctrl+HJKL
 for _, dir in ipairs({"h", "j", "k", "l"}) do
   local desc = ({ h = "left", j = "below", k = "above", l = "right" })[dir]
-  vim.keymap.set("n", "<C-" .. dir .. ">", "<C-w>" .. dir, { silent = true, desc = "Go to " .. desc .. " window" })
+  vim.keymap.set({"n", "i", "t"}, "<C-" .. dir .. ">", "<cmd>wincmd " .. dir .. "<CR>", { silent = true, desc = "Go to " .. desc .. " window" })
 end
 
 -- Resize du tree avec Ctrl+Alt+flèches (Inversé)
@@ -74,7 +74,6 @@ vim.keymap.set("n", "<leader>X", close_all_buffers, { silent = true, desc = "Clo
 
 -- Supprimer le mot précédent en mode insert (Ctrl+Backspace)
 vim.keymap.set("i", "<C-BS>", "<C-W>", { desc = "Delete previous word" })
-vim.keymap.set("i", "<C-h>", "<C-W>", { desc = "Delete previous word" })
 
 -- Lazy Loading Triggers (using utils.lazy_require)
 vim.keymap.set("n", "<leader>ff", utils.lazy_require("config.finder", "open"), { desc = "Find Files (Native)" })

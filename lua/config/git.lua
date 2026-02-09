@@ -177,22 +177,26 @@ local function parse_status(raw)
   for _, line in ipairs(lines) do
     local status_code = line:sub(1, 2)
     local path = line:sub(4)
-    if status_code:match("R") then 
-      local arrow = path:find(" -> ")
-      if arrow then path = path:sub(arrow + 4) end
+    
+    -- Filter out .gitignore and .git
+    if not (path == ".gitignore" or path:match("^%.git/")) then
+      if status_code:match("R") then 
+        local arrow = path:find(" -> ")
+        if arrow then path = path:sub(arrow + 4) end
+      end
+      local type = "modified"
+      local s1, s2 = status_code:sub(1,1), status_code:sub(2,2)
+      if s1 == "?" then type = "untracked"
+      elseif s1 == "A" or s2 == "A" then type = "added"
+      elseif s1 == "D" or s2 == "D" then type = "deleted" 
+      end
+      local is_staged = (s1 ~= " " and s1 ~= "?")
+      local icon_data = ui.get_icon_data(path)
+      table.insert(state.files, {
+        path = path, status = status_code, staged = is_staged,
+        type = type, icon = icon_data.icon, hl = icon_data.hl
+      })
     end
-    local type = "modified"
-    local s1, s2 = status_code:sub(1,1), status_code:sub(2,2)
-    if s1 == "?" then type = "untracked"
-    elseif s1 == "A" or s2 == "A" then type = "added"
-    elseif s1 == "D" or s2 == "D" then type = "deleted" 
-    end
-    local is_staged = (s1 ~= " " and s1 ~= "?")
-    local icon_data = ui.get_icon_data(path)
-    table.insert(state.files, {
-      path = path, status = status_code, staged = is_staged,
-      type = type, icon = icon_data.icon, hl = icon_data.hl
-    })
   end
 end
 
@@ -306,7 +310,7 @@ end
 -- =============================================================================
 
 local function update_preview()
-  if not api.nvim_win_is_valid(state.wins.preview) then return end
+  if not state.wins.preview or not api.nvim_win_is_valid(state.wins.preview) then return end
   local buf = state.bufs.preview
   local pane = state.active_pane
   local cursor = api.nvim_win_get_cursor(state.wins[pane])[1]
@@ -330,12 +334,26 @@ local function update_preview()
         set_buf(buf, { " [Deleted file] " })
       end)
     elseif file.type == "untracked" then
-      if vim.fn.filereadable(file.path) == 1 then
-        local content = vim.fn.readfile(file.path)
-        set_buf(buf, content)
-        vim.bo[buf].filetype = vim.filetype.match({ filename = file.path }) or ""
+      local full_path = (state.repo_root or vim.fn.getcwd()) .. "/" .. file.path
+      if vim.fn.filereadable(full_path) == 1 then
+        -- Basic check for binary files
+        local f = io.open(full_path, "rb")
+        local is_binary = false
+        if f then
+          local chunk = f:read(1024)
+          if chunk and chunk:find("%z") then is_binary = true end
+          f:close()
+        end
+
+        if is_binary then
+          set_buf(buf, { " [Binary file] " })
+        else
+          local content = vim.fn.readfile(full_path)
+          set_buf(buf, content)
+          vim.bo[buf].filetype = vim.filetype.match({ filename = file.path }) or ""
+        end
       else
-         set_buf(buf, { " [Directory or Binary] " })
+         set_buf(buf, { " [Directory or Special File] " })
       end
     else
       local args = { "diff", "--color=never" }
@@ -371,7 +389,7 @@ end
 -- =============================================================================
 
 local function refresh()
-  git({ "status", "--porcelain" }, function(out)
+  git({ "status", "--porcelain", "--ignored=no" }, function(out)
     parse_status(out)
     render_files()
     if state.active_pane == "files" then update_preview() end
@@ -777,8 +795,16 @@ local function setup_buffer_maps(buf, pane)
 end
 
 function M.open()
-  if state.wins.files and api.nvim_win_is_valid(state.wins.files) then return end
+  if state.wins.commit and api.nvim_win_is_valid(state.wins.commit) then return end
   
+  -- Auto-detect repo root
+  local git_dir = vim.fn.finddir(".git", vim.fn.getcwd() .. ";")
+  if git_dir ~= "" then
+    state.repo_root = vim.fn.fnamemodify(git_dir, ":p:h:h")
+  else
+    state.repo_root = vim.fn.getcwd()
+  end
+
   -- Setup Ollama in background on first open
   setup_ollama()
   
@@ -841,16 +867,27 @@ function M.open()
   api.nvim_set_current_win(state.wins.commit)
   state.active_pane = "commit"
   
-  -- Autoclose mechanism
+  -- Autoclose mechanism : if ANY window is closed, close all
   state.augroup = api.nvim_create_augroup("GitDashboard", { clear = true })
-  api.nvim_create_autocmd("WinClosed", {
-    pattern = tostring(state.wins.commit),
-    group = state.augroup,
-    callback = function()
-      for _, win in pairs(state.wins) do pcall(api.nvim_win_close, win, true) end
-      state.log_visible = false
-    end
-  })
+  local main_wins = { state.wins.commit, state.wins.files, state.wins.branches, state.wins.preview }
+  
+  for _, win_id in ipairs(main_wins) do
+    api.nvim_create_autocmd("WinClosed", {
+      pattern = tostring(win_id),
+      group = state.augroup,
+      callback = function()
+        vim.schedule(function()
+          for _, win in pairs(state.wins) do 
+            if win and win ~= -1 and api.nvim_win_is_valid(win) then
+              pcall(api.nvim_win_close, win, true) 
+            end
+          end
+          state.log_visible = false
+          state.wins = { files = -1, branches = -1, commit = -1, preview = -1, help = -1, log = -1 }
+        end)
+      end
+    })
+  end
   
   refresh()
 end
