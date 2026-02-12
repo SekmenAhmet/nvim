@@ -54,4 +54,28 @@ vim.api.nvim_create_autocmd("TermOpen", {
   end,
   desc = "Terminal UI settings",
 })
+
+-- 5. Auto-create parent directories on save
+vim.api.nvim_create_autocmd("BufWritePre", {
+  group = config_augroup,
+  callback = function(event)
+    if event.match:match("^%w%w+:[\\/][\\/]") then
+      return
+    end
+    local file = vim.uv.fs_realpath(event.match) or event.match
+    vim.fn.mkdir(vim.fn.fnamemodify(file, ":p:h"), "p")
+  end,
+  desc = "Create parent directories on save",
+})
+
+-- 6. Resize splits when window is resized
+vim.api.nvim_create_autocmd("VimResized", {
+  group = config_augroup,
+  callback = function()
+    local current_tab = vim.api.nvim_get_current_tabpage()
+    vim.cmd("tabdo wincmd =")
+    vim.api.nvim_set_current_tabpage(current_tab)
+  end,
+  desc = "Resize splits on window resize",
+})
   
