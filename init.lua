@@ -43,17 +43,25 @@ vim.schedule(function()
   require("config.marks")
   require("config.multicursor")
   require("config.quickfix")
+  require("config.workflow").setup()
   
   -- Startup time report
   local end_time = vim.uv.hrtime()
   local startup_ms = (end_time - start_time) / 1e6
   vim.g.startup_time = startup_ms -- Global variable for statusline
   
-  vim.api.nvim_create_user_command("StartupTime", function()
-    print(string.format("⚡ Neovim chargé en %.2f ms", startup_ms))
-  end, {})
-end)
-
+      vim.api.nvim_create_user_command("StartupTime", function()
+      print(string.format("⚡ Neovim chargé en %.2f ms", startup_ms))
+    end, {})
+  end)
+  
+  -- Dashboard trigger (VimEnter for stability)
+  vim.api.nvim_create_autocmd("VimEnter", {
+    callback = function()
+      require("config.dashboard").open()
+    end
+  })
+  
 -- Lazy load interaction heavy modules on InsertEnter
 vim.api.nvim_create_autocmd("InsertEnter", {
   once = true,
