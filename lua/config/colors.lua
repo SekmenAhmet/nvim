@@ -19,6 +19,7 @@ local c = {
   cyan = "#7dcfff",
   blue = "#7aa2f7",
   purple = "#bb9af7",
+  magenta = "#bb9af7", -- Added magenta (alias for purple/magenta in Tokyo Night)
 }
 
 function M.setup()
@@ -135,12 +136,14 @@ function M.setup()
   set("DiagnosticWarn", { fg = c.yellow })
   set("DiagnosticInfo", { fg = c.blue })
   set("DiagnosticHint", { fg = c.cyan })
+  set("DiagnosticOk", { fg = c.green })
   
   -- LSP Signs (Gutter)
   set("DiagnosticSignError", { fg = c.red, bold = true })
   set("DiagnosticSignWarn", { fg = c.yellow, bold = true })
   set("DiagnosticSignInfo", { fg = c.blue })
   set("DiagnosticSignHint", { fg = c.cyan })
+  set("DiagnosticSignOk", { fg = c.green })
   
   -- LSP Underline
   set("DiagnosticUnderlineError", { underline = true, sp = c.red })
@@ -179,6 +182,7 @@ function M.setup()
   set("GitBranchCurrent", { fg = c.green, bold = true })
   set("GitBranchLocal", { fg = c.blue })
   set("GitBranchRemote", { fg = c.purple })
+  set("GitStashId", { fg = c.purple, bold = true })
   set("GitLogGraph", { fg = c.fg_gutter })
   set("GitLogHash", { fg = c.orange, bold = true })
   set("GitLogRef", { fg = c.blue })
