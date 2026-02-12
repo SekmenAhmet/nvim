@@ -219,7 +219,7 @@ function M.open()
     local res = state.results[res_idx]
     if res then 
       close()
-      require("config.ui").open_in_normal_win(res.filename, res.lnum) 
+      require("utils.ui").open_in_normal_win(res.filename, res.lnum) 
     end
   end
 

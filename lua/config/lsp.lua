@@ -2,11 +2,11 @@ local M = {}
 
 -- Single augroup for all LSP formatting (optimization) - DEFINED FIRST
 local lsp_format_augroup = vim.api.nvim_create_augroup("LspFormatting", { clear = true })
+local ui_icons = require("utils.icons").ui
 
 function M.on_attach(client, bufnr)
   -- Keymaps
   local opts = { buffer = bufnr, silent = true }
-  local ui_icons = require("utils.icons").ui
   
   vim.keymap.set("n", "gd", vim.lsp.buf.definition, opts)
   vim.keymap.set("n", "K", vim.lsp.buf.hover, opts)
@@ -20,6 +20,7 @@ function M.on_attach(client, bufnr)
 
   -- Auto-format on save (using global augroup for efficiency)
   if client.server_capabilities.documentFormattingProvider then
+    vim.api.nvim_clear_autocmds({ group = lsp_format_augroup, buffer = bufnr })
     vim.api.nvim_create_autocmd("BufWritePre", {
       group = lsp_format_augroup,
       buffer = bufnr,
@@ -31,7 +32,6 @@ function M.on_attach(client, bufnr)
 end
 
 -- Configuration globale des diagnostics
-local ui_icons = require("utils.icons").ui
 vim.diagnostic.config({
   signs = {
     text = {
@@ -81,5 +81,97 @@ vim.api.nvim_create_autocmd("CursorHold", {
 
 M.capabilities = vim.lsp.protocol.make_client_capabilities()
 M.capabilities.textDocument.completion.completionItem.snippetSupport = true
+
+-- Configuration par serveur
+M.server_settings = {
+  lua_ls = {
+    settings = {
+      Lua = {
+        runtime = {
+          version = "LuaJIT",
+        },
+        diagnostics = {
+          globals = { "vim" },
+        },
+        workspace = {
+          library = vim.api.nvim_get_runtime_file("", true),
+          checkThirdParty = false,
+        },
+        telemetry = {
+          enable = false,
+        },
+      },
+    },
+  },
+  rust_analyzer = {
+    settings = {
+      ["rust-analyzer"] = {
+        checkOnSave = {
+          command = "clippy",
+        },
+        procMacro = {
+          enable = true,
+        },
+        cargo = {
+          loadOutDirsFromCheck = true,
+        },
+      },
+    },
+  },
+  gopls = {
+    settings = {
+      gopls = {
+        analyses = {
+          unusedparams = true,
+          shadow = true,
+        },
+        staticcheck = true,
+        completeUnimported = true,
+        usePlaceholders = true,
+        directoryFilters = { "-.git", "-.vscode", "-.idea", "-.vscode-test", "-node_modules" },
+      },
+    },
+  },
+  clangd = {
+    capabilities = {
+      offsetEncoding = { "utf-16" },
+    },
+    cmd = {
+      "clangd",
+      "--background-index",
+      "--clang-tidy",
+      "--header-insertion=iwyu",
+      "--completion-style=detailed",
+      "--function-arg-placeholders",
+      "--fallback-style=llvm",
+    },
+  },
+  yamlls = {
+    settings = {
+      yaml = {
+        schemaStore = {
+          enable = true,
+          url = "https://www.schemastore.org/api/json/catalog.json",
+        },
+        schemas = {
+          ["https://json.schemastore.org/github-workflow.json"] = "/.github/workflows/*",
+          ["https://json.schemastore.org/github-action.json"] = "/.github/actions/*",
+        },
+      },
+    },
+  },
+  jsonls = {
+    settings = {
+      json = {
+        validate = { enable = true },
+      },
+    },
+  },
+  -- jdtls: Pour une expérience complète, nvim-jdtls est recommandé.
+  -- En natif, lspconfig utilise les root_markers standards (pom.xml, gradlew, .git).
+  jdtls = {},
+  asm_lsp = {},
+  taplo = {},
+}
 
 return M

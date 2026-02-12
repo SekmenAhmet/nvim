@@ -219,7 +219,7 @@ function M.open()
     local file = state.filtered_files[idx]
     if file then
       close()
-      require("config.ui").open_in_normal_win(file)
+      require("utils.ui").open_in_normal_win(file)
     end
   end
 

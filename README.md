@@ -141,6 +141,21 @@ Puis sélectionnez et installez les serveurs de langage dont vous avez besoin.
 | `[d` | Normal | Diagnostic précédent |
 | `]d` | Normal | Diagnostic suivant |
 
+### Langages Supportés (LSP & Treesitter)
+- **Rust** (`rust_analyzer`)
+- **Go** (`gopls`)
+- **TypeScript/JS** (`ts_ls`)
+- **Python** (`pyright`)
+- **C/C++** (`clangd`)
+- **Assembly (x86_64)** (`asm_lsp`)
+- **Java** (`jdtls`)
+- **YAML** (`yamlls`)
+- **JSON** (`jsonls`)
+- **Lua** (`lua_ls`)
+- **TOML** (`taplo`)
+- **HTML/CSS** (`html`, `cssls`)
+
+
 ### Complétion
 | Raccourci | Mode | Description |
 |-----------|------|-------------|

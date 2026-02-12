@@ -200,7 +200,7 @@ function M.toggle()
     if item.type == "directory" then
       M.expanded[item.path] = not M.expanded[item.path]; M.draw()
     else
-      require("config.ui").open_in_normal_win(item.path)
+      require("utils.ui").open_in_normal_win(item.path)
     end
   end)
   

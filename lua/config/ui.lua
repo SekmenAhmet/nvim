@@ -84,37 +84,4 @@ end
 vim.ui.select = M.select
 vim.ui.input = M.input
 
--- Open in normal win (Helper)
-function M.open_in_normal_win(file, lnum)
-  local curr_win = vim.api.nvim_get_current_win()
-  local cur_buf = vim.api.nvim_win_get_buf(curr_win)
-  local ft = vim.bo[cur_buf].filetype
-  local cfg = vim.api.nvim_win_get_config(curr_win)
-  
-  if ft == "tree" or ft == "netrw" or cfg.relative ~= "" then
-    vim.cmd("wincmd p")
-    curr_win = vim.api.nvim_get_current_win()
-    cur_buf = vim.api.nvim_win_get_buf(curr_win)
-    ft = vim.bo[cur_buf].filetype
-    cfg = vim.api.nvim_win_get_config(curr_win)
-    
-    if ft == "tree" or ft == "netrw" or cfg.relative ~= "" then
-      for _, w in ipairs(vim.api.nvim_list_wins()) do
-        local w_buf = vim.api.nvim_win_get_buf(w)
-        if vim.api.nvim_win_get_config(w).relative == "" and vim.bo[w_buf].filetype ~= "tree" then
-          vim.api.nvim_set_current_win(w)
-          goto found
-        end
-      end
-      vim.cmd("vsplit")
-    end
-  end
-  ::found::
-  vim.cmd("edit " .. vim.fn.fnameescape(file))
-  if lnum then
-    vim.api.nvim_win_set_cursor(0, { tonumber(lnum), 0 })
-    vim.cmd("normal! zz")
-  end
-end
-
 return M
