@@ -209,6 +209,9 @@ end
 -- @param bufnr number: buffer number
 -- @return string|nil: "error", "warn", or nil
 function M.get_diagnostic_level(bufnr)
+  if not bufnr or bufnr <= 0 or not api.nvim_buf_is_valid(bufnr) then
+    return nil
+  end
   local errs = #vim.diagnostic.get(bufnr, { severity = vim.diagnostic.severity.ERROR })
   if errs > 0 then return "error" end
   local warns = #vim.diagnostic.get(bufnr, { severity = vim.diagnostic.severity.WARN })
@@ -361,11 +364,20 @@ end
 -- @param buf_preview number
 -- @param win_preview number
 -- @param opts table: { lnum = number, timer = uv_timer, cache = table, on_loaded = function }
+
+local function set_buf_lines(buf, lines)
+  if not api.nvim_buf_is_valid(buf) then return end
+  local mod = vim.bo[buf].modifiable
+  vim.bo[buf].modifiable = true
+  api.nvim_buf_set_lines(buf, 0, -1, false, lines)
+  vim.bo[buf].modifiable = mod
+end
+
 function M.async_preview(filepath, buf_preview, win_preview, opts)
   opts = opts or {}
   if not filepath or filepath == "" or not api.nvim_buf_is_valid(buf_preview) then
     if api.nvim_buf_is_valid(buf_preview) then
-      api.nvim_buf_set_lines(buf_preview, 0, -1, false, {})
+      set_buf_lines(buf_preview, {})
     end
     return
   end
@@ -378,7 +390,7 @@ function M.async_preview(filepath, buf_preview, win_preview, opts)
     local c = opts.cache[key]
     vim.schedule(function()
       if not api.nvim_buf_is_valid(buf_preview) then return end
-      api.nvim_buf_set_lines(buf_preview, 0, -1, false, c.lines)
+      set_buf_lines(buf_preview, c.lines)
       if c.ft then vim.bo[buf_preview].filetype = c.ft end
       if win_preview and api.nvim_win_is_valid(win_preview) then
         pcall(api.nvim_win_set_cursor, win_preview, {c.relative_lnum or 1, 0})
@@ -407,7 +419,7 @@ function M._do_preview_read(filepath, buf, win, lnum, key, opts)
   local uv = vim.uv
   local stat = uv.fs_stat(filepath)
   if not stat or stat.type ~= "file" then
-    api.nvim_buf_set_lines(buf, 0, -1, false, { " [File not found or Directory] " })
+    set_buf_lines(buf, { " [File not found or Directory] " })
     return
   end
 
@@ -458,7 +470,7 @@ function M._do_preview_read(filepath, buf, win, lnum, key, opts)
           opts.cache[key] = { lines = lines, ft = ft, relative_lnum = rel_lnum }
         end
 
-        api.nvim_buf_set_lines(buf, 0, -1, false, lines)
+        set_buf_lines(buf, lines)
         if ft then vim.bo[buf].filetype = ft end
         
         if win and api.nvim_win_is_valid(win) then

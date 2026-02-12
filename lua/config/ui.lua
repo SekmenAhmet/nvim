@@ -1,139 +1,13 @@
--- Native UI Overrides & Icon Provider
 local M = {}
+local icons = require("utils.icons")
+local ui_utils = require("utils.ui")
 
--- Icon Configuration (Icon + Hex Color)
-local icons_config = {
-  -- Languages & Extensions
-  lua  = { icon = "", color = "#51a0cf" },
-  py   = { icon = "", color = "#ffbc03" },
-  js   = { icon = "", color = "#cbcb41" },
-  ts   = { icon = "", color = "#3178c6" },
-  jsx  = { icon = "", color = "#61dbfb" },
-  tsx  = { icon = "", color = "#3178c6" },
-  html = { icon = "", color = "#e34c26" },
-  css  = { icon = "", color = "#563d7c" },
-  scss = { icon = "", color = "#c6538c" },
-  json = { icon = "", color = "#cbcb41" },
-  xml  = { icon = "", color = "#e34c26" },
-  c    = { icon = "", color = "#599eff" },
-  cpp  = { icon = "", color = "#599eff" },
-  h    = { icon = "", color = "#a074c4" },
-  rs   = { icon = "", color = "#dea584" },
-  go   = { icon = "", color = "#00add8" },
-  java = { icon = "", color = "#cc3e44" },
-  php  = { icon = "", color = "#a074c4" },
-  rb   = { icon = "", color = "#701516" },
-  sh   = { icon = "", color = "#4d5a5e" },
-  bash = { icon = "", color = "#4d5a5e" },
-  zsh  = { icon = "", color = "#89e051" },
-  md   = { icon = "", color = "#ffffff" },
-  txt  = { icon = "", color = "#89e051" },
-  yml  = { icon = "", color = "#6d8086" },
-  yaml = { icon = "", color = "#6d8086" },
-  toml = { icon = "", color = "#6d8086" },
-  make = { icon = "", color = "#6d8086" },
-  conf = { icon = "", color = "#6d8086" },
-  git  = { icon = "", color = "#f14e32" },
-  Dockerfile = { icon = "", color = "#384d54" },
-  dockerignore = { icon = "", color = "#384d54" },
-  sql  = { icon = "", color = "#dadada" },
-  rake = { icon = "", color = "#701516" },
-  swift = { icon = "", color = "#e37933" },
-  lock = { icon = "", color = "#bbbbbb" },
-  vue = { icon = "", color = "#42b883" },
-  svelte = { icon = "", color = "#ff3e00" },
-  jsonc = { icon = "", color = "#cbcb41" },
-  json5 = { icon = "", color = "#cbcb41" },
-  graphql = { icon = "", color = "#e10098" },
-  gql = { icon = "", color = "#e10098" },
-  
-  -- Common Files (Exact matches)
-  [".gitignore"] = { icon = "", color = "#f14e32" },
-  [".gitconfig"] = { icon = "", color = "#f14e32" },
-  ["Makefile"]   = { icon = "", color = "#6d8086" },
-  ["package.json"] = { icon = "", color = "#689f63" },
-  ["package-lock.json"] = { icon = "", color = "#7bb077" },
-  ["node_modules"] = { icon = "", color = "#E8274B" },
-  ["LICENSE"] = { icon = "", color = "#d0bf41" },
-  ["README.md"] = { icon = "", color = "#42a5f5" },
-  [".env"] = { icon = "", color = "#faf743" },
-
-  -- Media
-  png = { icon = "", color = "#a074c4" },
-  jpg = { icon = "", color = "#a074c4" },
-  jpeg = { icon = "", color = "#a074c4" },
-  gif = { icon = "", color = "#a074c4" },
-  svg = { icon = "", color = "#ffb13b" },
-  pdf = { icon = "", color = "#ff3333" },
-  
-  -- Archives
-  zip = { icon = "", color = "#dcb239" },
-  tar = { icon = "", color = "#dcb239" },
-  gz = { icon = "", color = "#dcb239" },
-  ["7z"] = { icon = "", color = "#dcb239" },
-}
-
--- Setup function to define highlight groups
 function M.setup()
-  for name, data in pairs(icons_config) do
-    -- Clean name for HL group (no dots)
-    local hl_name = name:gsub("%.", "")
-    vim.api.nvim_set_hl(0, "Icon" .. hl_name, { fg = data.color })
-  end
-  vim.api.nvim_set_hl(0, "IconDefault", { fg = "#89e051" })
-  vim.api.nvim_set_hl(0, "IconDir", { fg = "#7aa2f7" }) -- Folder color (Blue)
-  vim.api.nvim_set_hl(0, "IconDirOpen", { fg = "#9ece6a" }) -- Open Folder color (Greenish)
+  icons.setup()
+  ui_utils.setup_lsp_handlers()
 end
 
--- Optimized Icon Cache (High Capacity)
-local icon_cache = {}
-local cache_size = 0
--- 500 entrées est un compromis idéal mémoire/hit-rate
-local max_cache_size = 500 
-
--- Return { icon = "...", hl = "Icon..." }
-function M.get_icon_data(filename)
-  if icon_cache[filename] then
-    return icon_cache[filename]
-  end
-  
-  local name = vim.fn.fnamemodify(filename, ":t")
-  local ext = filename:match("%.([^%.]+)$")
-  local result
-  
-  -- Exact match first
-  if icons_config[name] then
-    result = { icon = icons_config[name].icon, hl = "Icon" .. name:gsub("%.", "") }
-  -- Extension match
-  elseif ext and icons_config[ext:lower()] then
-    result = { icon = icons_config[ext:lower()].icon, hl = "Icon" .. ext:lower():gsub("%.", "") }
-  else
-    result = { icon = "", hl = "IconDefault" }
-  end
-  
-  -- Si plein, on vide tout (Strategy "Trash Can"). 
-  -- Pour des icônes (donnée dérivée peu coûteuse), c'est plus performant que de maintenir une LRU list en Lua pur.
-  if cache_size >= max_cache_size then
-    icon_cache = {}
-    cache_size = 0
-  end
-  
-  icon_cache[filename] = result
-  cache_size = cache_size + 1
-  
-  return result
-end
-
--- UI Helpers (Select/Input)
--- Uses utils.create_centered_win for window creation
-local function create_win(width, height, title)
-  return require("utils").create_centered_win({
-    width_pct = width / vim.o.columns,
-    height_pct = height / vim.o.lines,
-    title = title,
-  })
-end
-
+-- UI Helpers (Select/Input) Overrides
 function M.select(items, opts, on_choice)
   opts = opts or {}
   local choices = {}
@@ -152,7 +26,13 @@ function M.select(items, opts, on_choice)
   width = math.min(width + 4, math.floor(vim.o.columns * 0.8))
   local height = math.min(#choices, math.floor(vim.o.lines * 0.8))
 
-  local win_info = create_win(width, height, opts.prompt or "Select")
+  local win_info = ui_utils.create_centered_win({
+    width_pct = width / vim.o.columns,
+    height = height,
+    title = opts.prompt or "Select",
+    enter = true
+  })
+  
   local buf, win = win_info.buf, win_info.win
   vim.api.nvim_buf_set_lines(buf, 0, -1, false, choices)
   
@@ -174,9 +54,14 @@ function M.input(opts, on_confirm)
   local prompt = opts.prompt or "Input: "
   local default = opts.default or ""
   local width = math.floor(vim.o.columns * 0.4)
-  local height = 1
-
-  local win_info = create_win(width, height, prompt:gsub(":$", ""))
+  
+  local win_info = ui_utils.create_centered_win({
+    width_pct = width / vim.o.columns,
+    height = 1,
+    title = prompt:gsub(":$", ""),
+    enter = true
+  })
+  
   local buf, win = win_info.buf, win_info.win
   vim.api.nvim_buf_set_lines(buf, 0, -1, false, { default })
   vim.bo[buf].buftype = "nofile"
@@ -194,43 +79,37 @@ function M.input(opts, on_confirm)
   vim.keymap.set({"i", "n"}, "<CR>", confirm, { buffer = buf, silent = true })
   vim.keymap.set({"i", "n"}, "<Esc>", function() close(); if on_confirm then on_confirm(nil) end end, { buffer = buf, silent = true })
 end
--- Re-apply overrides in case of reload
+
+-- Global Overrides
 vim.ui.select = M.select
 vim.ui.input = M.input
 
--- Open in normal win
+-- Open in normal win (Helper)
 function M.open_in_normal_win(file, lnum)
   local curr_win = vim.api.nvim_get_current_win()
-  local cur_buf = vim.api.nvim_get_current_buf()
+  local cur_buf = vim.api.nvim_win_get_buf(curr_win)
   local ft = vim.bo[cur_buf].filetype
   local cfg = vim.api.nvim_win_get_config(curr_win)
   
-  -- Si on est dans le tree ou une fenêtre flottante
   if ft == "tree" or ft == "netrw" or cfg.relative ~= "" then
-    vim.cmd("wincmd p") -- Aller à la fenêtre précédente
+    vim.cmd("wincmd p")
     curr_win = vim.api.nvim_get_current_win()
-    cur_buf = vim.api.nvim_get_current_buf()
+    cur_buf = vim.api.nvim_win_get_buf(curr_win)
     ft = vim.bo[cur_buf].filetype
     cfg = vim.api.nvim_win_get_config(curr_win)
     
-    -- Si la fenêtre précédente est aussi invalide (ex: on vient de lancer nvim)
     if ft == "tree" or ft == "netrw" or cfg.relative ~= "" then
-      local found = false
       for _, w in ipairs(vim.api.nvim_list_wins()) do
         local w_buf = vim.api.nvim_win_get_buf(w)
-        local w_ft = vim.bo[w_buf].filetype
-        if vim.api.nvim_win_get_config(w).relative == "" and w_ft ~= "tree" and w_ft ~= "netrw" then
+        if vim.api.nvim_win_get_config(w).relative == "" and vim.bo[w_buf].filetype ~= "tree" then
           vim.api.nvim_set_current_win(w)
-          found = true
-          break
+          goto found
         end
       end
-      if not found then 
-        vim.cmd("vsplit") -- Créer une nouvelle fenêtre
-        vim.cmd("wincmd l") -- Aller à droite
-      end
+      vim.cmd("vsplit")
     end
   end
+  ::found::
   vim.cmd("edit " .. vim.fn.fnameescape(file))
   if lnum then
     vim.api.nvim_win_set_cursor(0, { tonumber(lnum), 0 })

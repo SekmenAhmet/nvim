@@ -1,110 +1,106 @@
--- Statusline Native Customisée (Optimisée)
-
 local M = {}
+local icons = require("utils.icons").ui
+local state = require("core.state")
 
--- Cache Git pour éviter les lectures répétées
-local git_cache = {
-  branch = nil,
-  repo_path = nil,
-  timestamp = 0,
-  ttl = 5  -- 5 secondes de cache
-}
+-- =============================================================================
+-- HELPERS
+-- =============================================================================
 
--- 1. Récupération Git Optimisée avec Cache
-local function get_git_branch()
-  local git_dir = vim.fn.finddir(".git", ";")
-  if git_dir == "" then 
-    git_cache.branch = nil
-    git_cache.repo_path = nil
-    return "" 
-  end
-  
-  local repo_path = vim.fn.fnamemodify(git_dir, ":p:h:h")
-  local now = vim.uv.now() / 1000  -- en secondes
-  
-  -- Vérifier si le cache est encore valide
-  if git_cache.repo_path == repo_path and 
-     (now - git_cache.timestamp) <= git_cache.ttl then
-    return git_cache.branch or ""
-  end
-  
-  -- Cache invalide : recalculer
-  local head_file = git_dir .. "/HEAD"
-  local f = io.open(head_file, "r")
-  if not f then 
-    git_cache.branch = ""
-    git_cache.repo_path = repo_path
-    git_cache.timestamp = now
-    return "" 
-  end
-  
-  local content = f:read("*all")
-  f:close()
-  
-  -- Parse "ref: refs/heads/master"
-  local branch = content:match("ref: refs/heads/(.+)")
-  local result = ""
-  if branch then
-    result = "  " .. branch:gsub("\n", "") .. " "
-  end
-  
-  -- Mettre à jour le cache
-  git_cache.branch = result
-  git_cache.repo_path = repo_path
-  git_cache.timestamp = now
-  
-  return result
+local function get_mode()
+  local mode_map = {
+    ['n']      = { name = 'NORMAL',   hl = 'StatusLineNormal' },
+    ['no']     = { name = 'OP-PEND',  hl = 'StatusLineNormal' },
+    ['v']      = { name = 'VISUAL',   hl = 'StatusLineVisual' },
+    ['V']      = { name = 'V-LINE',   hl = 'StatusLineVisual' },
+    ['\22']    = { name = 'V-BLOCK',  hl = 'StatusLineVisual' },
+    ['s']      = { name = 'SELECT',   hl = 'StatusLineVisual' },
+    ['S']      = { name = 'S-LINE',   hl = 'StatusLineVisual' },
+    ['\19']    = { name = 'S-BLOCK',  hl = 'StatusLineVisual' },
+    ['i']      = { name = 'INSERT',   hl = 'StatusLineInsert' },
+    ['ic']     = { name = 'INSERT',   hl = 'StatusLineInsert' },
+    ['R']      = { name = 'REPLACE',  hl = 'StatusLineReplace' },
+    ['Rv']     = { name = 'V-REPLACE', hl = 'StatusLineReplace' },
+    ['c']      = { name = 'COMMAND',  hl = 'StatusLineCmd' },
+    ['cv']     = { name = 'VIM EX',   hl = 'StatusLineCmd' },
+    ['ce']     = { name = 'EX',       hl = 'StatusLineCmd' },
+    ['r']      = { name = 'PROMPT',   hl = 'StatusLineNormal' },
+    ['rm']     = { name = 'MOAR',     hl = 'StatusLineNormal' },
+    ['r?']     = { name = 'CONFIRM',  hl = 'StatusLineNormal' },
+    ['!']      = { name = 'SHELL',    hl = 'StatusLineNormal' },
+    ['t']      = { name = 'TERMINAL', hl = 'StatusLineInsert' },
+  }
+  local m = mode_map[vim.api.nvim_get_mode().mode] or { name = 'UNKNOWN', hl = 'StatusLineNormal' }
+  return string.format("%%#%s# %s %%*", m.hl, m.name)
 end
 
--- Update branch only on BufEnter/DirChanged, not every redraw
-local statusline_augroup = vim.api.nvim_create_augroup("NativeStatusline", { clear = true })
-
-vim.api.nvim_create_autocmd({ "BufEnter", "FocusGained", "DirChanged" }, {
-  group = statusline_augroup,
-  callback = function()
-    vim.b.git_branch = get_git_branch()
-  end,
-})
-
--- 2. Fonction de rendu
-function M.render()
-  local current_mode = vim.api.nvim_get_mode().mode
-  -- Highlights are now in colors.lua (StatusLineNormal, etc)
+local function get_git()
+  local git = state.data.git
+  if not git.branch or git.branch == "" then return "" end
   
-  local mode_map = {
-    ['n'] = 'NORMAL', ['no'] = 'NORMAL', ['v'] = 'VISUAL', ['V'] = 'V-LINE',
-    [''] = 'V-BLOCK', ['s'] = 'SELECT', ['S'] = 'S-LINE', [''] = 'S-BLOCK',
-    ['i'] = 'INSERT', ['ic'] = 'INSERT', ['R'] = 'REPLACE', ['Rv'] = 'V-REPLACE',
-    ['c'] = 'COMMAND', ['cv'] = 'VIM EX', ['ce'] = 'EX', ['r'] = 'PROMPT',
-    ['rm'] = 'MOAR', ['r?'] = 'CONFIRM', ['!'] = 'SHELL', ['t'] = 'TERMINAL',
+  local parts = {}
+  if git.status.added > 0 then table.insert(parts, "%#GitStatusAdded#+" .. git.status.added) end
+  if git.status.changed > 0 then table.insert(parts, "%#GitStatusModified#~" .. git.status.changed) end
+  if git.status.removed > 0 then table.insert(parts, "%#GitStatusDeleted#-" .. git.status.removed) end
+  
+  local status_str = #parts > 0 and (" [" .. table.concat(parts, " ") .. "%%*]") or ""
+  return string.format("%%#GitBranchCurrent# %s%s %%*%s ", icons.branch, git.branch, status_str)
+end
+
+local function get_diagnostics()
+  local errors = #vim.diagnostic.get(0, { severity = vim.diagnostic.severity.ERROR })
+  local warns = #vim.diagnostic.get(0, { severity = vim.diagnostic.severity.WARN })
+  
+  local parts = {}
+  if errors > 0 then table.insert(parts, "%#DiagnosticError#" .. icons.error .. errors) end
+  if warns > 0 then table.insert(parts, "%#DiagnosticWarn#" .. icons.warn .. warns) end
+  
+  return #parts > 0 and (" " .. table.concat(parts, " ") .. " %%*") or ""
+end
+
+local function get_docker()
+  local running = state.data.docker.active_containers
+  if running > 0 then
+    return string.format("%%#DiagnosticOk# %s%d %%*", icons.docker, running)
+  end
+  return ""
+end
+
+local function get_rest()
+  local rest = state.data.rest
+  if rest.is_pending then
+    return string.format("%%#DiagnosticInfo# %s ... %%*", icons.rest)
+  elseif rest.last_status then
+    local hl = "DiagnosticInfo"
+    if rest.last_status:match(" 2%d%d") then hl = "DiagnosticOk"
+    elseif rest.last_status:match(" [45]%d%d") then hl = "DiagnosticError" end
+    return string.format("%%#%s# %s %s %%*", hl, icons.rest, rest.last_status:match(" %d%d%d") or rest.last_status)
+  end
+  return ""
+end
+
+-- =============================================================================
+-- RENDER
+-- =============================================================================
+
+function M.render()
+  local parts = {
+    get_mode(),
+    get_git(),
+    "%#StatusLine# %f %m %#StatusLine#",
+    get_diagnostics(),
+    "%=", -- Right align starts here
+    get_docker(),
+    get_rest(),
+    "%#StatusLine# %l:%c │ %p%% ",
+    vim.g.startup_time and string.format("%%#StatusLine#⚡ %.1fms ", vim.g.startup_time) or ""
   }
   
-  local mode_name = mode_map[current_mode] or 'UNKNOWN'
-  
-  -- Dynamic Highlight based on mode
-  local mode_hl = "StatusLineNormal"
-  if current_mode:match("^i") then mode_hl = "StatusLineInsert"
-  elseif current_mode:match("^[vV]") then mode_hl = "StatusLineVisual"
-  elseif current_mode == "R" then mode_hl = "StatusLineReplace"
-  elseif current_mode == "c" then mode_hl = "StatusLineCmd"
-  end
-
-  local git = vim.b.git_branch or ""
-  local file_name = "%f"
-  local modified = "%m"
-  local line_col = "%l:%c"
-  local percentage = "%p%%"
-  
-  local startup = ""
-  if vim.g.startup_time then
-    startup = string.format(" ⚡ %.1fms ", vim.g.startup_time)
-  end
-
-  return string.format(
-    "%%#%s# %s %%*%%#Comment#%s%%* %%#Normal#%s%s %%= %%#CursorLineNr# %s │ %s%%#Comment#%s",
-    mode_hl, mode_name, git, file_name, modified, line_col, percentage, startup
-  )
+  return table.concat(parts, " ")
 end
+
+-- =============================================================================
+-- SETUP
+-- =============================================================================
 
 vim.opt.statusline = "%!v:lua.require'config.statusline'.render()"
 vim.opt.laststatus = 3

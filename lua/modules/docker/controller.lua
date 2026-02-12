@@ -1,0 +1,108 @@
+local api = vim.api
+local State = require("core.state")
+local Model = require("modules.docker.model")
+local View = require("modules.docker.view")
+local uv = vim.uv
+
+local M = {}
+local refresh_timer = nil
+
+function M.refresh()
+  local entity_type = State.get("docker.entity_type") or "containers"
+  if entity_type == "containers" then
+    Model.list_containers(function()
+      local selected_id = State.get("docker.selected_id")
+      if selected_id then
+        Model.get_stats(selected_id, function(stats)
+          View.draw_meta(stats)
+        end)
+      end
+    end)
+  elseif entity_type == "images" then
+    Model.list_images()
+  elseif entity_type == "volumes" then
+    Model.list_volumes()
+  end
+end
+
+function M.toggle()
+  local is_active = not State.get("docker.is_active")
+  State.set("docker.is_active", is_active)
+  
+  if is_active then
+    View.layout()
+    M.setup_autocmds()
+    M.setup_keymaps()
+    M.start_refresh_timer()
+    M.refresh()
+  else
+    M.stop_refresh_timer()
+    View.close()
+  end
+end
+
+function M.start_refresh_timer()
+  if refresh_timer then return end
+  refresh_timer = uv.new_timer()
+  refresh_timer:start(0, 3000, vim.schedule_wrap(function()
+    if State.get("docker.is_active") then
+      M.refresh()
+    else
+      M.stop_refresh_timer()
+    end
+  end))
+end
+
+function M.stop_refresh_timer()
+  if refresh_timer then
+    refresh_timer:stop()
+    refresh_timer:close()
+    refresh_timer = nil
+  end
+end
+
+function M.setup_autocmds()
+  local side_buf = View.bufs.side
+  if not side_buf or not api.nvim_buf_is_valid(side_buf) then return end
+  
+  api.nvim_create_autocmd("CursorMoved", {
+    buffer = side_buf,
+    callback = function()
+      local idx = api.nvim_win_get_cursor(0)[1]
+      local entity_type = State.get("docker.entity_type") or "containers"
+      local entities = State.get("docker.entities." .. entity_type) or {}
+      local entity = entities[idx]
+      if entity then
+        local id = entity.id or entity.name
+        if id ~= State.get("docker.selected_id") then
+          State.set("docker.selected_id", id)
+        end
+      end
+    end
+  })
+end
+
+function M.setup_keymaps()
+  local bufs = View.bufs
+  for name, buf in pairs(bufs) do
+    if api.nvim_buf_is_valid(buf) then
+      local opts = { buffer = buf, silent = true }
+      vim.keymap.set("n", "q", M.toggle, opts)
+      vim.keymap.set("n", "<Tab>", function()
+        local current = State.get("docker.active_tab") or 1
+        State.set("docker.active_tab", current == 1 and 2 or 1)
+      end, opts)
+      
+      -- Entity selection
+      vim.keymap.set("n", "C", function() State.set("docker.entity_type", "containers") end, opts)
+      vim.keymap.set("n", "I", function() State.set("docker.entity_type", "images") end, opts)
+      vim.keymap.set("n", "V", function() State.set("docker.entity_type", "volumes") end, opts)
+      
+      -- Navigation
+      vim.keymap.set("n", "<C-h>", function() if View.wins.side then api.nvim_set_current_win(View.wins.side) end end, opts)
+      vim.keymap.set("n", "<C-l>", function() if View.wins.main then api.nvim_set_current_win(View.wins.main) end end, opts)
+    end
+  end
+end
+
+return M

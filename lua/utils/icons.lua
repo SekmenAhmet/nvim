@@ -72,10 +72,38 @@ M.icons_config = {
   ["7z"] = { icon = "", color = "#dcb239" },
 }
 
+-- UI & Diagnostic Icons
+M.ui = {
+  error   = " ",
+  warn    = " ",
+  info    = " ",
+  hint    = "󰌵 ",
+  ok      = " ",
+  git     = " ",
+  branch  = " ",
+  docker  = " ",
+  rest    = "󰖟 ",
+  spinner = "󱑊 ",
+  arrow   = " ",
+  chevron = " ",
+  lock    = " ",
+  circle  = " ",
+}
+
 -- Simple LRU cache for icon lookups
 local icon_cache = {}
 local cache_size = 0
 local max_cache_size = 200
+
+function M.setup()
+  for name, data in pairs(M.icons_config) do
+    local hl_name = "Icon" .. name:gsub("%.", "")
+    vim.api.nvim_set_hl(0, hl_name, { fg = data.color })
+  end
+  vim.api.nvim_set_hl(0, "IconDefault", { fg = "#89e051" })
+  vim.api.nvim_set_hl(0, "IconDir", { fg = "#7aa2f7" })
+  vim.api.nvim_set_hl(0, "IconDirOpen", { fg = "#9ece6a" })
+end
 
 -- Return { icon = "...", hl = "Icon..." }
 function M.get(filename)

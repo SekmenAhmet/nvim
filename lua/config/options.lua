@@ -26,15 +26,13 @@ local opts = {
   scrolloff      = 8,
   signcolumn     = "yes",
   undofile       = true,
-  list           = true,
+  list           = false,
   updatetime     = 250,
 }
 
 for k, v in pairs(opts) do
   vim.opt[k] = v
 end
-
-vim.opt.listchars = { trail = "·", nbsp = "␣", tab = "  ", lead = " " }
 
 -- UI optimizations
 vim.opt.shortmess:append("I")

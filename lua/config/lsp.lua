@@ -6,6 +6,8 @@ local lsp_format_augroup = vim.api.nvim_create_augroup("LspFormatting", { clear 
 function M.on_attach(client, bufnr)
   -- Keymaps
   local opts = { buffer = bufnr, silent = true }
+  local ui_icons = require("utils.icons").ui
+  
   vim.keymap.set("n", "gd", vim.lsp.buf.definition, opts)
   vim.keymap.set("n", "K", vim.lsp.buf.hover, opts)
   vim.keymap.set("n", "<leader>rn", vim.lsp.buf.rename, opts)
@@ -29,13 +31,14 @@ function M.on_attach(client, bufnr)
 end
 
 -- Configuration globale des diagnostics
+local ui_icons = require("utils.icons").ui
 vim.diagnostic.config({
   signs = {
     text = {
-      [vim.diagnostic.severity.ERROR] = "E",
-      [vim.diagnostic.severity.WARN] = "W",
-      [vim.diagnostic.severity.INFO] = "I",
-      [vim.diagnostic.severity.HINT] = "H",
+      [vim.diagnostic.severity.ERROR] = ui_icons.error,
+      [vim.diagnostic.severity.WARN] = ui_icons.warn,
+      [vim.diagnostic.severity.INFO] = ui_icons.info,
+      [vim.diagnostic.severity.HINT] = ui_icons.hint,
     },
     linehl = {
       [vim.diagnostic.severity.ERROR] = "DiagnosticLineError",
