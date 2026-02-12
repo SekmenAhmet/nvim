@@ -3,7 +3,7 @@
 
 local M = {}
 local uv = vim.uv
-local ui = require("config.ui")
+local icons = require("utils.icons")
 local utils = require("utils")
 
 -- Configuration
@@ -21,34 +21,13 @@ local state = {
   buf_preview = nil,
   win_preview = nil,
   job_handle = nil,
-  results = {}, -- Raw results from grep
-  line_map = {}, -- Maps buffer line to result index
-  timer_debounce = vim.uv.new_timer(), -- Timer réutilisable unique
-  timer_preview = vim.uv.new_timer(),  -- Timer réutilisable unique
+  results = {},
+  line_map = {},
+  timer_debounce = vim.uv.new_timer(),
+  timer_preview = vim.uv.new_timer(),
   last_query = "",
-  last_preview_key = nil,
-  preview_cache = {}, -- Simple cache for file previews
+  preview_cache = {},
 }
-
--- Ignore patterns
-local function get_ignore_args()
-  local common_ignores = {
-    "node_modules", ".git", ".venv", "__pycache__", "target", "build", "dist",
-    ".next", ".nuxt", ".output", "out", "coverage", ".npm", ".yarn",
-    ".idea", ".vscode", ".DS_Store", "thumbs.db", "tmp", "temp", "vendor", "logs"
-  }
-  local args = {}
-  for _, ignore in ipairs(common_ignores) do
-    table.insert(args, "--glob")
-    table.insert(args, "!" .. ignore)
-  end
-  local ext_ignores = { "*.lock", "*.log", "*.min.js", "*.map", "*.jpg", "*.png", "*.gif", "*.svg", "*.mp4", "*.zip", "*.tar.gz", "*.pdf" }
-  for _, ext in ipairs(ext_ignores) do
-    table.insert(args, "--glob")
-    table.insert(args, "!" .. ext)
-  end
-  return args
-end
 
 -- 1. Preview Logic
 local function update_preview(filename, lnum)
@@ -58,7 +37,6 @@ local function update_preview(filename, lnum)
     timer = state.timer_preview,
     cache = state.preview_cache,
     on_loaded = function(rel_lnum)
-      -- Apply search highlight
       local ns = vim.api.nvim_create_namespace("grep_preview")
       vim.api.nvim_buf_clear_namespace(state.buf_preview, ns, 0, -1)
       vim.api.nvim_buf_add_highlight(state.buf_preview, ns, "Search", rel_lnum - 1, 0, -1)
@@ -82,7 +60,6 @@ local function render_list(query)
   local highlights = {}
   state.line_map = {}
 
-  -- Separator (Line 2 in buffer)
   table.insert(display_lines, "  " .. string.rep("─", vim.api.nvim_win_get_width(state.win_list) - 4))
 
   if #state.results == 0 then
@@ -91,41 +68,27 @@ local function render_list(query)
     local current_file = nil
     for i, res in ipairs(state.results) do
       if #display_lines > 500 then break end
-      -- New file group
       if res.filename ~= current_file then
         current_file = res.filename
-        -- Strip ./ and trim spaces
         local clean_name = res.filename:gsub("^%./", ""):gsub("^%s*(.-)%s*$", "%1")
-        local icon_data = ui.get_icon_data(clean_name)
+        local icon_data = icons.get(clean_name)
         
         table.insert(display_lines, " " .. icon_data.icon .. " " .. clean_name)
-        
         local row = 1 + (#display_lines - 1) 
-        local col_end = 1 + #icon_data.icon
-        table.insert(highlights, { row = row, col_start = 1, col_end = col_end, hl = icon_data.hl })
+        table.insert(highlights, { row = row, col_start = 1, col_end = 1 + #icon_data.icon, hl = icon_data.hl })
       end
       
-      -- Trim result text to avoid messy indentation in the list
       local clean_text = res.text:gsub("^%s*(.-)%s*$", "%1")
-      local line_str = string.format("   %s: %s", res.lnum, clean_text)
-      table.insert(display_lines, line_str)
-      -- Map absolute buffer line index (1 for sep + index in list)
+      table.insert(display_lines, string.format("   %s: %s", res.lnum, clean_text))
       state.line_map[1 + #display_lines] = i
     end
   end
 
-  -- Initial Init of Line 1 if empty (just in case)
-  if vim.api.nvim_buf_line_count(state.buf_list) == 0 then
-     vim.api.nvim_buf_set_lines(state.buf_list, 0, -1, false, {"  "})
-  end
-
-  -- Update ONLY lines 2+ (Results)
   vim.api.nvim_buf_set_lines(state.buf_list, 1, -1, false, display_lines)
   vim.api.nvim_buf_clear_namespace(state.buf_list, -1, 1, -1)
 
   for i, line in ipairs(display_lines) do
     local hl_row = i
-
     if line:match("^   %d+:") then
       local lnum_end = line:find(":")
       vim.api.nvim_buf_add_highlight(state.buf_list, -1, "LineNr", hl_row, 3, lnum_end)
@@ -140,7 +103,6 @@ local function render_list(query)
     vim.api.nvim_buf_add_highlight(state.buf_list, -1, hl.hl, hl.row, hl.col_start, hl.col_end)
   end
 
-  -- IMPORTANT: DO NOT TOUCH CURSOR IF INSERT MODE
   if vim.api.nvim_get_mode().mode ~= 'i' then
       vim.api.nvim_win_set_cursor(state.win_list, {1, 2 + #query})
   end
@@ -162,45 +124,21 @@ local function start_grep(query)
   if state.job_handle and not state.job_handle:is_closing() then state.job_handle:close() end
   state.results = {}
 
-  local cmd = "rg"
-  local args = { "--vimgrep", "--no-heading", "--smart-case" }
-  local ignore_args = get_ignore_args()
-  for _, v in ipairs(ignore_args) do table.insert(args, v) end
-  table.insert(args, query)
-  table.insert(args, ".")
-
+  local args = { "--vimgrep", "--no-heading", "--smart-case", "--glob", "!.git/*", "--glob", "!node_modules/*", query, "." }
   local stdout = uv.new_pipe(false)
-  local stderr = uv.new_pipe(false) -- Capture stderr for safety
-
-  state.job_handle = uv.spawn(cmd, {
+  local handle
+  handle = uv.spawn("rg", {
     args = args,
-    stdio = { nil, stdout, stderr },
-  }, function(code, signal)
+    stdio = { nil, stdout, nil },
+  }, function()
     stdout:read_stop()
-    stderr:read_stop()
     stdout:close()
-    stderr:close()
-    if state.job_handle and not state.job_handle:is_closing() then
-      state.job_handle:close()
-    end
+    if handle and not handle:is_closing() then handle:close() end
   end)
-
-  stderr:read_start(function(err, data)
-    if err then
-      vim.schedule(function()
-        vim.notify("Grep stderr error: " .. tostring(err), vim.log.levels.WARN)
-      end)
-    end
-  end)
+  state.job_handle = handle
 
   local buffer = ""
   stdout:read_start(function(err, data)
-    if err then
-      vim.schedule(function()
-        vim.notify("Grep error: " .. tostring(err), vim.log.levels.ERROR)
-      end)
-      return
-    end
     if data then
       buffer = buffer .. data
       local lines = vim.split(buffer, "\n")
@@ -209,12 +147,9 @@ local function start_grep(query)
       for _, line in ipairs(lines) do
         local parts = vim.split(line, ":")
         if #parts >= 4 then
-          local filename = parts[1]
-          local lnum = parts[2]
           local text = table.concat(parts, ":", 4)
-          local is_comment = text:match("^%s*//") or text:match("^%s*#") or text:match("^%s*%-%-") or text:match("^%s*%%") or text:match("^%s*/%*") or text:match("^%s*%*")
-          if not is_comment then
-             table.insert(state.results, { filename = filename, lnum = lnum, text = text })
+          if not text:match("^%s*[/#-]") then
+             table.insert(state.results, { filename = parts[1], lnum = parts[2], text = text })
           end
         end
       end
@@ -237,34 +172,10 @@ local function create_ui()
     preview_title = "Preview",
     list_filetype = "grep_list",
   })
-
-  state.buf_list = wins.buf_list
-  state.win_list = wins.win_list
-  state.buf_preview = wins.buf_preview
-  state.win_preview = wins.win_preview
-
-  -- Enable line numbers for preview (grep specific)
+  state.buf_list, state.win_list, state.buf_preview, state.win_preview = wins.buf_list, wins.win_list, wins.buf_preview, wins.win_preview
   vim.wo[state.win_preview].number = true
-
-  -- Setup scroll preview mappings
   utils.setup_scroll_preview(state, state.buf_list)
-
-  -- Setup auto-close avec nettoyage des highlights
-  utils.setup_auto_close(state, {
-    on_close = function()
-      -- Nettoyer les highlights du preview
-      local ns = vim.api.nvim_create_namespace("grep_preview")
-      if state.buf_preview and vim.api.nvim_buf_is_valid(state.buf_preview) then
-        vim.api.nvim_buf_clear_namespace(state.buf_preview, ns, 0, -1)
-      end
-      -- Nettoyer tous les buffers de highlights grep
-      for _, buf in ipairs(vim.api.nvim_list_bufs()) do
-        if vim.api.nvim_buf_is_valid(buf) then
-          vim.api.nvim_buf_clear_namespace(buf, ns, 0, -1)
-        end
-      end
-    end
-  })
+  utils.setup_auto_close(state)
 end
 
 -- 5. Main
@@ -278,18 +189,10 @@ function M.open()
     callback = function()
       local cursor = vim.api.nvim_win_get_cursor(state.win_list)
       if cursor[1] == 1 then
-        -- Enforce Padding Synchronously Here
         local line = vim.api.nvim_buf_get_lines(state.buf_list, 0, 1, false)[1] or ""
-        if not line:match("^  ") then
-           local fixed = "  " .. line:gsub("^%s*", "")
-           vim.api.nvim_buf_set_lines(state.buf_list, 0, 1, false, {fixed})
-           vim.api.nvim_win_set_cursor(state.win_list, {1, #fixed})
-           line = fixed
-        end
-
         local query = line:sub(3)
         state.timer_debounce:stop()
-        state.timer_debounce:start(20, 0, vim.schedule_wrap(function() start_grep(query) end))
+        state.timer_debounce:start(100, 0, vim.schedule_wrap(function() start_grep(query) end))
       end
     end
   })
@@ -298,38 +201,24 @@ function M.open()
     buffer = state.buf_list,
     callback = function()
       local cursor = vim.api.nvim_win_get_cursor(state.win_list)
-      local row = cursor[1]
-      local res_idx = state.line_map[row]
+      local res_idx = state.line_map[cursor[1]]
       if res_idx then
-        local res = state.results[res_idx]
-        if res then update_preview(res.filename, res.lnum) end
-      elseif row == 1 and #state.results > 0 then
-        local res = state.results[1]
-        if res then update_preview(res.filename, res.lnum) end
+        update_preview(state.results[res_idx].filename, state.results[res_idx].lnum)
       end
     end
   })
 
   local function close()
-    -- Cleanup timers safely
     utils.cleanup_timers({ state.timer_debounce, state.timer_preview })
     utils.close_windows(state)
   end
 
   local function open_result()
     local cursor = vim.api.nvim_win_get_cursor(state.win_list)
-    local row = cursor[1]
-    local res_idx = state.line_map[row] or (row == 1 and 1 or nil)
-    local res = res_idx and state.results[res_idx]
+    local res_idx = state.line_map[cursor[1]] or 1
+    local res = state.results[res_idx]
     if res then 
       close()
-      -- Nettoyer les highlights avant d'ouvrir
-      local ns = vim.api.nvim_create_namespace("grep_preview")
-      for _, buf in ipairs(vim.api.nvim_list_bufs()) do
-        if vim.api.nvim_buf_is_valid(buf) then
-          vim.api.nvim_buf_clear_namespace(buf, ns, 0, -1)
-        end
-      end
       require("config.ui").open_in_normal_win(res.filename, res.lnum) 
     end
   end
@@ -337,11 +226,7 @@ function M.open()
   local opts = { buffer = state.buf_list }
   vim.keymap.set({"i", "n"}, "<Esc>", close, opts)
   vim.keymap.set({"i", "n"}, "<CR>", open_result, opts)
-
-  -- Navigation (Unified & Strict)
   utils.setup_list_navigation(state.buf_list, state.win_list, 3)
-
-  -- AUTO-REDIRECT INPUT: Type anywhere to search
   utils.setup_redirect_input(state.buf_list, function() return state.win_list end)
 end
 
