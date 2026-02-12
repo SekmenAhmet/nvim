@@ -1,50 +1,66 @@
-# 🚀 Neovim Configuration
+## 🚀 Neovim Configuration (MVC Native Edition)
 
-Une configuration Neovim moderne, rapide et personnalisée avec un thème Tokyo Night et des fonctionnalités avancées.
+Une configuration Neovim moderne, ultra-rapide et totalement native, structurée selon un pattern **MVC (Model-View-Controller)** pour une maintenance et une performance optimales.
 
-## ✨ Fonctionnalités
+## ✨ Fonctionnalités Majeures (Native Tools)
 
-### 🎨 Interface
-- **Thème personnalisé** : Tokyo Night Refined avec des couleurs modernes et contrastées
-- **Statusline native** : Barre de statut personnalisée affichant le mode, le fichier, les diagnostics et le temps de démarrage
-- **Tabline native** : Gestion des buffers avec indicateurs de diagnostics LSP
-- **Interface utilisateur** : Icônes personnalisées pour les types de fichiers et les dossiers
+### 🐳 Docker Commander (Native MVC)
+- **Gestion complète** : Conteneurs, Images et Volumes dans une interface flottante.
+- **Performance** : Totalement asynchrone via `vim.uv` (ne bloque jamais l'UI).
+- **Intégration** : Logs en temps réel et terminaux exécutés directement dans Neovim.
 
-### ⚡ Performance
-- **Démarrage optimisé** : Chargement différé des modules non critiques
-- **Loader Lua** : Cache des modules Lua activé pour des performances maximales
-- **Providers désactivés** : Python, Ruby, Node.js et Perl providers désactivés pour réduire le temps de démarrage
-- **Plugins natifs désactivés** : Netrw, gzip, tar, etc. désactivés pour améliorer les performances
-- **Mesure du temps de démarrage** : Commande `:StartupTime` pour afficher le temps de démarrage
+### 󰊢 Git Ninja (Native MVC)
+- **Dashboard Git** : Interface complète pour le staging, les branches, les stashes et les commits.
+- **AI Commit** : Génération de messages de commit intelligents via IA (Ollama/OpenAI) intégrée.
+- **Diff & Patch** : Prévisualisation des diffs et application sélective de hunks nativement.
 
-### 🛠️ Développement
-- **LSP (Language Server Protocol)** :
-  - Support pour Lua, Python, TypeScript, HTML, CSS
-  - Autocomplétion native avec suggestions automatiques
-  - Diagnostics en temps réel
-  - Navigation de code (go to definition, references, etc.)
-  
-- **Treesitter** :
-  - Coloration syntaxique avancée
-  - Indentation intelligente
-  - Support pour de nombreux langages
+### 󰖟 REST Architect (Native MVC)
+- **Client HTTP complet** : Support OpenAPI (YAML), variables d'environnement (.env) et historique.
+- **Asynchrone** : Exécution de requêtes via `curl` en arrière-plan avec prévisualisation du corps et des headers.
+- **UI Tabulée** : Navigation fluide entre le body, les headers et la réponse.
 
-- **Mason** :
-  - Gestionnaire de serveurs LSP
-  - Installation facile via `:Mason`
+### 🧠 Workflow Integrator
+- **Automatisation** : Connexion intelligente entre les outils (ex: Docker triggers Git actions).
+- **Central State** : Source de vérité unique (`core.state`) pour une interface réactive.
 
-### 📝 Édition
-- **Autopairs** : Fermeture automatique des parenthèses, crochets et guillemets
-- **Multicursor** : Support des curseurs multiples
-- **Marks** : Gestion des marques
-- **Illuminate** : Mise en surbrillance des occurrences du mot sous le curseur
-- **Quickfix** : Navigation améliorée dans la liste quickfix
+## 🎨 Interface & UX
+- **Tokyo Night Refined** : Thème sombre moderne et contrasté.
+- **Native UI Kit** : Utilisation exclusive des fenêtres flottantes natives, `vim.ui.select` et `vim.ui.input` personnalisés.
+- **Responsive** : Redimensionnement automatique des panneaux et disposition adaptative.
 
-### 🔍 Navigation
-- **Finder** : Explorateur de fichiers natif personnalisé
-- **Grep** : Recherche dans les fichiers avec aperçu
-- **Terminal** : Terminal intégré
-- **Window Management** : Gestion avancée des fenêtres
+## ⚡ Performance & Qualité
+- **Async First** : Toutes les opérations d'I/O et de processus utilisent `vim.uv` (Anti-Freeze).
+- **Structure Propre** : Code modulaire (Model/View/Controller) validé par `lua-doctor`.
+- **Zéro Bloat** : Dépendances externes minimales (Lazy, Mason, Treesitter).
+
+## ⌨️ Raccourcis Clavier Principaux
+
+| Raccourci | Description |
+|-----------|-------------|
+| `<C-g>` | Toggle Git Dashboard |
+| `<C-d>` | Toggle Docker Client |
+| `<C-p>` | Toggle REST Client |
+| `<C-t>` | Toggle Terminal |
+| `<C-b>` | Toggle File Tree (Netrw) |
+| `<Leader>ff` | Find Files (Native) |
+| `<Leader>fg` | Live Grep (Native) |
+
+## 📁 Structure du Projet (MVC)
+
+```
+nvim/
+├── init.lua                 # Point d'entrée optimisé
+├── lua/
+│   ├── core/
+│   │   └── state.lua        # Modèle d'état central (Single Source of Truth)
+│   ├── modules/             # Outils All-in-One (MVC Pattern)
+│   │   ├── docker/          # Model, View, Controller pour Docker
+│   │   ├── git/             # Model, View, Controller pour Git
+│   │   └── rest/            # Model, View, Controller pour REST
+│   ├── config/              # Configurations & Bridges
+│   └── utils/               # Helpers UI, IO, AI et Picker
+└── README.md
+```
 
 ## 📦 Installation
 
