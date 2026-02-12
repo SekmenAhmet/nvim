@@ -3,8 +3,9 @@
 
 local M = {}
 local uv = vim.uv
-local ui = require("config.ui")
+local icons = require("utils.icons")
 local utils = require("utils")
+local fuzzy = require("utils.fuzzy")
 
 -- Configuration
 local CONFIG = {
@@ -25,81 +26,14 @@ local state = {
   filtered_files = {}, -- Displayed files
   last_results = {}, -- Objects {file, score} for incremental filtering
   last_query = "",
-  preview_timer = vim.uv.new_timer(), -- Timer réutilisable unique
+  preview_timer = vim.uv.new_timer(),
   last_preview_file = nil,
 }
-
--- Smart Fuzzy Scoring Algorithm
--- "uc" matches "user_controller", "conf" matches "my_config"
-local function score_file(file, query_lower)
-  if query_lower == "" then return 1 end
-  
-  local file_lower = file:lower()
-  local filename = file_lower:match("^.+/(.+)$") or file_lower
-  
-  -- Vérifier match exact d'abord
-  if filename == query_lower then return 1000 end
-  if vim.startswith(filename, query_lower) then return 800 end
-  
-  -- Fuzzy matching
-  local query_idx = 1
-  local score = 0
-  local last_match = 0
-  local consecutive = 0
-  
-  for i = 1, #filename do
-    if filename:sub(i, i) == query_lower:sub(query_idx, query_idx) then
-      -- Bonus début de fichier
-      if i == 1 then score = score + 15 end
-      
-      -- Bonus début de mot (après _ - . /)
-      if i > 1 and filename:sub(i-1, i-1):match("[%-_%.]") then
-        score = score + 12
-      end
-      
-      -- Bonus caractères consécutifs
-      if last_match == i - 1 then
-        consecutive = consecutive + 1
-        score = score + 8 + consecutive * 2
-      else
-        consecutive = 0
-        score = score + 5
-      end
-      
-      -- Malus distance entre matches
-      if last_match > 0 and i - last_match > 1 then
-        score = score - (i - last_match - 1) * 2
-      end
-      
-      query_idx = query_idx + 1
-      last_match = i
-      
-      if query_idx > #query_lower then
-        -- Match complet ! Bonus selon la position
-        local remaining_chars = #filename - i
-        return score + 100 + math.max(0, 50 - remaining_chars)
-      end
-    end
-  end
-  
-  -- Fallback : substring si fuzzy échoue
-  if filename:find(query_lower, 1, true) then
-    return 100
-  end
-  
-  -- Path match (dernier recours)
-  if file_lower:find(query_lower, 1, true) then
-    return 50
-  end
-  
-  return 0
-end
 
 -- 1. Preview Logic
 local function update_preview(filepath)
   utils.async_preview(filepath, state.buf_preview, state.win_preview, {
     timer = state.preview_timer,
-    cache = nil -- Finder usually doesn't need heavy caching as we move fast, but we could add it
   })
 end
 
@@ -120,10 +54,7 @@ local function create_ui()
   state.buf_preview = wins.buf_preview
   state.win_preview = wins.win_preview
 
-  -- Setup scroll preview mappings
   utils.setup_scroll_preview(state, state.buf_list)
-
-  -- Setup auto-close
   utils.setup_auto_close(state)
 end
 
@@ -133,10 +64,8 @@ local function filter_and_render(query)
 
   local padding = "  "
   local results = {}
-  local highlights = {} -- Store highlight instructions
+  local highlights = {}
 
-  local query_lower = query:lower()
-  
   -- INCREMENTAL FILTERING LOGIC
   local source_list = state.files
   if #query > #state.last_query and query:sub(1, #state.last_query) == state.last_query and #state.last_results > 0 then
@@ -146,68 +75,54 @@ local function filter_and_render(query)
 
   -- FILTER & SCORE
   local scored_files = {}
-
   for _, file in ipairs(source_list) do
     if query == "" then
        table.insert(scored_files, { file = file, score = 1 })
        if #scored_files > 500 then break end
     else
-       local score = score_file(file, query_lower)
+       local score = fuzzy.score(file, query)
        if score > 0 then
          table.insert(scored_files, { file = file, score = score })
        end
     end
   end
 
-  -- Update state for next incremental search
   state.last_query = query
   state.last_results = scored_files
 
-  -- SORT by Score DESC
   if query ~= "" then
     table.sort(scored_files, function(a, b) return a.score > b.score end)
   end
 
   -- DISPLAY
   state.filtered_files = {}
-  -- Header
   table.insert(results, padding .. query)
   table.insert(results, padding .. string.rep("─", vim.api.nvim_win_get_width(state.win_list) - 4))
 
   for i, item in ipairs(scored_files) do
     if i > 500 then break end
     local clean_file = item.file:gsub("^%./", "")
+    local icon_data = icons.get(clean_file)
 
-    -- Get Icon Data (icon + color group)
-    local icon_data = ui.get_icon_data(clean_file)
-
-    -- Format line: "   config.lua"
     local line_str = padding .. icon_data.icon .. " " .. clean_file
     table.insert(results, line_str)
     table.insert(state.filtered_files, clean_file)
 
-    -- Store highlight info: (line_index, col_start, col_end, hl_group)
-    -- Header takes 2 lines, so index is i + 1 (lua 0-based for highlight) + 2
     local row = i + 1
-    -- Padding (2) + Icon length (byte length)
     local icon_len = #icon_data.icon
     table.insert(highlights, { row = row, col_start = 2, col_end = 2 + icon_len, hl = icon_data.hl })
   end
 
   vim.api.nvim_buf_set_lines(state.buf_list, 0, -1, false, results)
-
-  -- APPLY HIGHLIGHTS
   vim.api.nvim_buf_clear_namespace(state.buf_list, -1, 0, -1)
   for _, hl in ipairs(highlights) do
     vim.api.nvim_buf_add_highlight(state.buf_list, -1, hl.hl, hl.row, hl.col_start, hl.col_end)
   end
 
-  -- Restore cursor
   if vim.api.nvim_get_mode().mode == 'i' then
       vim.api.nvim_win_set_cursor(state.win_list, {1, #padding + #query})
   end
 
-  -- AUTO PREVIEW FIRST RESULT
   if #state.filtered_files > 0 then
     update_preview(state.filtered_files[1])
   else
@@ -218,47 +133,33 @@ end
 -- 4. Start Scan
 local function start_scan(on_update)
   state.files = {}
-
   local cmd = vim.fn.executable("rg") == 1 and "rg" or "find"
   local args = cmd == "rg" 
-    and { "--files", "--hidden", "--glob", "!.git/*", "--glob", "!node_modules/*", "--glob", "!__pycache__/*", "--glob", "!target/*", "--glob", "!.venv/*" }
+    and { "--files", "--hidden", "--glob", "!.git/*", "--glob", "!node_modules/*" }
     or { ".", "-type", "f" }
 
   local stdout = uv.new_pipe(false)
-  local stderr = uv.new_pipe(false)
-
-  state.job_handle = uv.spawn(cmd, {
+  local handle
+  handle = uv.spawn(cmd, {
     args = args,
-    stdio = { nil, stdout, stderr },
-  }, function(code, signal)
+    stdio = { nil, stdout, nil },
+  }, function()
     stdout:read_stop()
-    stderr:read_stop()
     stdout:close()
-    stderr:close()
-    if state.job_handle and not state.job_handle:is_closing() then
-      state.job_handle:close()
-    end
-    state.job_handle = nil
+    if handle and not handle:is_closing() then handle:close() end
   end)
+  state.job_handle = handle
 
   local buffer = ""
   stdout:read_start(function(err, data)
-    if err then
-      vim.schedule(function()
-        vim.notify("Finder error: " .. tostring(err), vim.log.levels.ERROR)
-      end)
-      return
-    end
     if data then
       buffer = buffer .. data
       local lines = vim.split(buffer, "\n")
       buffer = lines[#lines]
       lines[#lines] = nil
-
       for _, line in ipairs(lines) do
         if line ~= "" then table.insert(state.files, line) end
       end
-
       if #state.files % CONFIG.batch_size == 0 then
         vim.schedule(on_update)
       end
@@ -275,12 +176,12 @@ function M.open()
   vim.cmd("startinsert")
 
   start_scan(function()
+    if not vim.api.nvim_buf_is_valid(state.buf_list) then return end
     local line = vim.api.nvim_buf_get_lines(state.buf_list, 0, 1, false)[1]
     local query = line and line:gsub("^  ", "") or ""
     filter_and_render(query)
   end)
 
-  -- Input Change
   vim.api.nvim_create_autocmd("TextChangedI", {
     buffer = state.buf_list,
     callback = function()
@@ -293,36 +194,28 @@ function M.open()
     end
   })
 
-  -- Cursor Move (Preview Update)
   vim.api.nvim_create_autocmd({"CursorMoved", "CursorMovedI"}, {
     buffer = state.buf_list,
     callback = function()
       local cursor = vim.api.nvim_win_get_cursor(state.win_list)
       local row = cursor[1]
-
       if row >= 3 then
         local idx = row - 2
-        local file = state.filtered_files[idx]
-        update_preview(file)
+        update_preview(state.filtered_files[idx])
       elseif row == 1 and #state.filtered_files > 0 then
         update_preview(state.filtered_files[1])
       end
     end
   })
 
-  -- Actions
   local function close()
-    -- Cleanup timers safely
     utils.cleanup_timers({ state.preview_timer })
     utils.close_windows(state)
-    -- WinClosed autocommand handles the rest
   end
 
   local function open_file()
     local cursor = vim.api.nvim_win_get_cursor(state.win_list)
-    local idx
-    if cursor[1] == 1 then idx = 1 else idx = cursor[1] - 2 end
-
+    local idx = cursor[1] == 1 and 1 or cursor[1] - 2
     local file = state.filtered_files[idx]
     if file then
       close()
@@ -333,11 +226,7 @@ function M.open()
   local opts = { buffer = state.buf_list }
   vim.keymap.set({"i", "n"}, "<Esc>", close, opts)
   vim.keymap.set({"i", "n"}, "<CR>", open_file, opts)
-
-  -- Navigation (Unified & Strict)
   utils.setup_list_navigation(state.buf_list, state.win_list, 3)
-
-  -- AUTO-REDIRECT INPUT: Type anywhere to search
   utils.setup_redirect_input(state.buf_list, function() return state.win_list end)
 end
 
