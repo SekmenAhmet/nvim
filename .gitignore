@@ -88,6 +88,8 @@ Cargo.lock
 *.dll
 *.dylib
 
+lazy-lock.json
+
 # --- Documentation ---
 site/
 _site/

@@ -44,6 +44,9 @@ vim.schedule(function()
   require("config.multicursor")
   require("config.quickfix")
   require("config.workflow").setup()
+  require("config.project")
+  require("config.ai")
+  require("config.health")
   
   -- Startup time report
   local end_time = vim.uv.hrtime()

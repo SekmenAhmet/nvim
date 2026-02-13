@@ -14,13 +14,15 @@ local function check_trigger()
   local col = cursor[2]
   local before = line:sub(1, col)
   
+  if before:match("^%s*$") then return end
+
   -- 1. Trigger sur les membres (obj.prop, obj->prop, class:meth)
   local char_before = before:sub(-1)
   local is_member = char_before:match("[%.:%-]") -- Déclenche sur . : - (pour ->)
   
-  -- 2. Trigger sur les mots (min 2 chars)
+  -- 2. Trigger sur les mots (min 1 char pour plus de réactivité)
   local word_before = before:match("[%w_]+$") or ""
-  local is_word = #word_before >= 2
+  local is_word = #word_before >= 1
 
   if is_member or is_word then
     -- Priorité à l'Omnifunc (LSP) si disponible
@@ -47,9 +49,9 @@ local completion_augroup = vim.api.nvim_create_augroup("NativeCompletion", { cle
 vim.api.nvim_create_autocmd("TextChangedI", {
   group = completion_augroup,
   callback = function()
-    -- Debounce de 150ms
+    -- Debounce de 80ms (plus rapide pour plus de fluidité)
     completion_timer:stop()
-    completion_timer:start(150, 0, vim.schedule_wrap(check_trigger))
+    completion_timer:start(80, 0, vim.schedule_wrap(check_trigger))
   end
 })
 

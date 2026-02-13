@@ -26,14 +26,13 @@ function M.select(items, opts, on_choice)
   width = math.min(width + 4, math.floor(vim.o.columns * 0.8))
   local height = math.min(#choices, math.floor(vim.o.lines * 0.8))
 
-  local win_info = ui_utils.create_centered_win({
+  local buf, win = ui_utils.create_centered_win({
     width_pct = width / vim.o.columns,
     height = height,
     title = opts.prompt or "Select",
     enter = true
   })
   
-  local buf, win = win_info.buf, win_info.win
   vim.api.nvim_buf_set_lines(buf, 0, -1, false, choices)
   
   local function close() if vim.api.nvim_win_is_valid(win) then vim.api.nvim_win_close(win, true) end end
@@ -55,14 +54,13 @@ function M.input(opts, on_confirm)
   local default = opts.default or ""
   local width = math.floor(vim.o.columns * 0.4)
   
-  local win_info = ui_utils.create_centered_win({
+  local buf, win = ui_utils.create_centered_win({
     width_pct = width / vim.o.columns,
     height = 1,
     title = prompt:gsub(":$", ""),
     enter = true
   })
   
-  local buf, win = win_info.buf, win_info.win
   vim.api.nvim_buf_set_lines(buf, 0, -1, false, { default })
   vim.bo[buf].buftype = "nofile"
   

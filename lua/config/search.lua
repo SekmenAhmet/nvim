@@ -154,15 +154,20 @@ function M.open()
   state.match_ids = {}
   
   -- Créer la fenêtre de recherche
-  local win = window.create_centered_win({
+  local buf, win = window.create_centered_win({
     width_pct = 0.25,
     height = 1,
     title = "Search",
-    row_offset = 2
+    row_offset = 0,
+    enter = true,
   })
   
-  state.buf = win.buf
-  state.win = win.win
+  state.buf = buf
+  state.win = win
+  
+  -- S'assurer que le buffer est modifiable
+  vim.bo[buf].modifiable = true
+  vim.bo[buf].buftype = "nofile"
   
   -- Initialiser avec padding
   api.nvim_buf_set_lines(state.buf, 0, -1, false, {"  "})

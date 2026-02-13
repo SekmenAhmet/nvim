@@ -61,15 +61,16 @@ function M.show_marks()
   end
   
   -- Créer fenêtre centrée
-  local win = window.create_centered_win({
+  local buf, win = window.create_centered_win({
     width_pct = 0.4,
     height = math.min(#marks + 4, 15),
     title = "Marks",
     row_offset = 5,
+    enter = true,
   })
   
-  state.buf = win.buf
-  state.win = win.win
+  state.buf = buf
+  state.win = win
   
   -- Construire les lignes
   local lines = {}

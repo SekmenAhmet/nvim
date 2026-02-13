@@ -90,7 +90,7 @@ function M.setup_keymaps()
       
       -- Global Git Actions
       vim.keymap.set("n", "q", M.toggle, opts)
-      vim.keymap.set("n", "<Esc>", M.toggle, opts)
+      vim.keymap.set({"n", "i", "v", "t"}, "<Esc>", M.toggle, opts)
       vim.keymap.set("n", "<Tab>", function() M.switch_pane() end, opts)
       vim.keymap.set("n", "r", M.refresh, opts)
       vim.keymap.set("n", "P", function() Model.push(M.refresh) end, opts)

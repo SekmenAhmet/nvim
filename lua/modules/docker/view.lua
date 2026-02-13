@@ -46,34 +46,37 @@ function M.layout()
   local mw = W - sw
   local mh = math.floor(H * Config.meta_pct)
 
-  local function setup_win(k, b, r, c, w, h, title)
-    local cfg = { 
-      relative = "editor", row = r, col = c, width = w-2, height = h-2, 
-      style = "minimal", border = "rounded", 
-      title = " " .. title .. " ", title_pos = "left" 
-    }
-    if M.wins[k] and api.nvim_win_is_valid(M.wins[k]) then 
-      api.nvim_win_set_config(M.wins[k], cfg)
-      api.nvim_win_set_buf(M.wins[k], b)
-    else 
-      M.wins[k] = api.nvim_open_win(b, false, cfg)
-    end
-    vim.wo[M.wins[k]].winhl = "Normal:Normal,FloatBorder:" .. Config.hl.border
-  end
-
   local entity_type = State.get("docker.entity_type") or "containers"
   local side_title = entity_type:gsub("^%l", string.upper)
-  local side_buf = M.get_buf("side", "docker_tree")
-  setup_win("side", side_buf, 0, 0, sw, H, side_title)
-
-  local meta_buf = M.get_buf("meta", "docker_info")
-  setup_win("meta", meta_buf, 0, sw, mw, mh, "Details")
-  
   local active_tab = State.get("docker.active_tab") or 1
+  
   local t1 = (active_tab == 1 and "󰄬" or "󰈙") .. " Logs"
   local t2 = (active_tab == 2 and "󰄬" or "󰆍") .. " Terminal"
-  local main_buf = (active_tab == 1 and M.get_buf("logs") or M.get_buf("term"))
-  setup_win("main", main_buf, mh, sw, mw, H - mh, string.format("%s  │  %s", t1, t2))
+
+  M.wins = ui_utils.layout_manager({
+    side = { 
+      width = sw, height = H, row = 0, col = 0, 
+      title = side_title, filetype = "docker_tree", cursorline = true,
+      buf = M.bufs.side
+    },
+    meta = { 
+      width = mw, height = mh, row = 0, col = sw, 
+      title = "Details", filetype = "docker_info",
+      buf = M.bufs.meta
+    },
+    main = { 
+      width = mw, height = H - mh, row = mh, col = sw, 
+      title = string.format("%s  │  %s", t1, t2),
+      filetype = active_tab == 1 and "docker_logs" or "docker_term",
+      buf = active_tab == 1 and M.get_buf("logs") or M.get_buf("term")
+    }
+  }, M.wins)
+  
+  -- Apply strict UI mode to sidebar
+  ui_utils.set_ui_mode(M.wins.side.buf, { win = M.wins.side.win })
+  
+  -- Update M.bufs from results
+  for k, res in pairs(M.wins) do M.bufs[k] = res.buf end
 end
 
 function M.draw_side()
@@ -174,8 +177,10 @@ function M.draw_meta(stats)
 end
 
 function M.close()
-  for _, w in pairs(M.wins) do
-    if api.nvim_win_is_valid(w) then api.nvim_win_close(w, true) end
+  for _, res in pairs(M.wins) do
+    if res.win and api.nvim_win_is_valid(res.win) then 
+      api.nvim_win_close(res.win, true) 
+    end
   end
   M.wins = {}
 end

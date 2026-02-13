@@ -154,7 +154,7 @@ function M.draw()
         if name_pos then
           local hl = item.type == "directory" and "Directory" or "Normal"
           local git_status = get_git_status_for_file(item.path)
-          local diag = utils.get_diagnostic_level(vim.fn.bufnr(item.path))
+          local diag = utils.get_diagnostic_level(item.path)
           
           if diag == "error" then hl = "DiagnosticError"
           elseif diag == "warn" then hl = "DiagnosticWarn"
@@ -170,10 +170,17 @@ function M.draw()
   vim.bo[M.buf].modifiable = false
 end
 
+function M.close()
+  if M.win and vim.api.nvim_win_is_valid(M.win) then
+    vim.api.nvim_win_close(M.win, true)
+  end
+  M.win = nil
+  vim.cmd("redrawtabline")
+end
+
 function M.toggle()
   if M.win and vim.api.nvim_win_is_valid(M.win) then
-    vim.api.nvim_win_close(M.win, true); M.win = nil
-    vim.cmd("redrawtabline")
+    M.close()
     return
   end
   
@@ -241,6 +248,16 @@ vim.api.nvim_create_autocmd({ "BufWritePost", "FocusGained", "BufEnter", "Diagno
     if M.win and vim.api.nvim_win_is_valid(M.win) then
       git_cache.timestamp = 0
       refresh_git_status(function() if M.win and vim.api.nvim_win_is_valid(M.win) then M.draw() end end)
+    end
+  end
+})
+
+-- Ensure diagnostics are reflected even when switching back to the tree
+vim.api.nvim_create_autocmd("WinEnter", {
+  group = tree_augroup,
+  callback = function()
+    if M.win and vim.api.nvim_win_is_valid(M.win) and vim.api.nvim_get_current_win() == M.win then
+      M.draw()
     end
   end
 })

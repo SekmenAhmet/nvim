@@ -70,11 +70,11 @@ end
 
 function Picker:close()
   -- Cleanup Timers
-  if self.state.timer_debounce then
+  if self.state.timer_debounce and not self.state.timer_debounce:is_closing() then
     self.state.timer_debounce:stop()
     self.state.timer_debounce:close()
   end
-  if self.state.timer_preview then
+  if self.state.timer_preview and not self.state.timer_preview:is_closing() then
     self.state.timer_preview:stop()
     self.state.timer_preview:close()
   end
@@ -85,8 +85,11 @@ function Picker:close()
   end
 
   -- Cleanup Windows
-  if self.state.win_list and api.nvim_win_is_valid(self.state.win_list) then
-    api.nvim_win_close(self.state.win_list, true)
+  local wins = { self.state.win_list, self.state.win_preview }
+  for _, win in ipairs(wins) do
+    if win and api.nvim_win_is_valid(win) then
+      api.nvim_win_close(win, true)
+    end
   end
 
   -- Callback
@@ -98,7 +101,7 @@ end
 -- =============================================================================
 
 function Picker:render(query)
-  if not api.nvim_buf_is_valid(self.state.buf_list) then return end
+  if not api.nvim_buf_is_valid(self.state.buf_list) or not api.nvim_win_is_valid(self.state.win_list) then return end
 
   local display_lines = {}
   local highlights = {}
@@ -106,7 +109,8 @@ function Picker:render(query)
 
   -- 1. Input Line & Header
   table.insert(display_lines, padding .. query)
-  table.insert(display_lines, padding .. string.rep("─", api.nvim_win_get_width(self.state.win_list) - 4))
+  local win_width = api.nvim_win_get_width(self.state.win_list)
+  table.insert(display_lines, padding .. string.rep("─", math.max(0, win_width - 4)))
 
   -- 2. Process Items
   -- If static mode, filter self.state.items
@@ -150,6 +154,7 @@ function Picker:render(query)
   end
 
   -- 3. Write Buffer
+  vim.bo[self.state.buf_list].modifiable = true
   api.nvim_buf_set_lines(self.state.buf_list, 0, -1, false, display_lines)
 
   -- 4. Apply Highlights
@@ -166,6 +171,29 @@ function Picker:render(query)
 
   -- 6. Trigger Preview
   self:update_preview()
+end
+
+function Picker:clear_items()
+  self.state.items = {}
+  self.state.filtered = {}
+  self:render(self.state.query)
+end
+
+function Picker:add_items(lines)
+  for _, line in ipairs(lines) do
+    if line ~= "" then
+      table.insert(self.state.items, line)
+    end
+  end
+  
+  -- If we are in dynamic mode (on_change), items ARE the filtered results
+  -- If in static mode and no query, filtered is items
+  if self.opts.on_change or self.state.query == "" then
+    self.state.filtered = self.state.items
+  end
+  
+  -- Re-render to show new items
+  self:render(self.state.query)
 end
 
 -- =============================================================================
@@ -187,15 +215,20 @@ function Picker:update_preview()
        self.opts.preview_item(item, self.state.buf_preview, self.state.win_preview)
     end))
   else
-    api.nvim_buf_set_lines(self.state.buf_preview, 0, -1, false, {})
+    if api.nvim_buf_is_valid(self.state.buf_preview) then
+      vim.bo[self.state.buf_preview].modifiable = true
+      api.nvim_buf_set_lines(self.state.buf_preview, 0, -1, false, {})
+      vim.bo[self.state.buf_preview].modifiable = false
+    end
   end
 end
 
 function Picker:setup_keymaps()
-  local opts = { buffer = self.state.buf_list }
+  local opts = { buffer = self.state.buf_list, silent = true }
 
   -- Close
   vim.keymap.set({"i", "n"}, "<Esc>", function() self:close() end, opts)
+  vim.keymap.set({"i", "n"}, "<C-c>", function() self:close() end, opts)
 
   -- Confirm
   vim.keymap.set({"i", "n"}, "<CR>", function()
@@ -293,6 +326,18 @@ function Picker:setup_autocmds()
     end
   })
 
+  -- Mode Guard: Prevent Insert mode on lines > 1
+  api.nvim_create_autocmd("InsertEnter", {
+    buffer = self.state.buf_list,
+    callback = function()
+      local cursor = api.nvim_win_get_cursor(self.state.win_list)
+      if cursor[1] > 1 then
+        -- Jump back to line 1 if they try to edit results
+        api.nvim_win_set_cursor(self.state.win_list, {1, #self.state.query + 2})
+      end
+    end
+  })
+
   -- Auto Close on WinLeave/Closed
   api.nvim_create_autocmd("WinClosed", {
     pattern = tostring(self.state.win_list),
@@ -312,15 +357,22 @@ function Picker:spawn(cmd, args, on_data, on_exit)
 
   local stdout = uv.new_pipe(false)
   local stderr = uv.new_pipe(false)
+  local stderr_buffer = ""
 
   self.state.job_handle = uv.spawn(cmd, {
     args = args,
     stdio = { nil, stdout, stderr },
   }, function(code, signal)
-    stdout:read_stop()
-    stderr:read_stop()
-    stdout:close()
-    stderr:close()
+    if stdout then stdout:read_stop(); stdout:close() end
+    if stderr then 
+      stderr:read_stop()
+      if stderr_buffer ~= "" and code ~= 0 then
+        vim.schedule(function()
+          vim.notify(cmd .. " error: " .. stderr_buffer, vim.log.levels.ERROR)
+        end)
+      end
+      stderr:close() 
+    end
     if self.state.job_handle and not self.state.job_handle:is_closing() then
        self.state.job_handle:close()
     end
@@ -336,8 +388,14 @@ function Picker:spawn(cmd, args, on_data, on_exit)
       buffer = lines[#lines]
       lines[#lines] = nil
 
-      vim.schedule(function() on_data(lines) end)
+      if #lines > 0 then
+        vim.schedule(function() on_data(lines) end)
+      end
     end
+  end)
+
+  stderr:read_start(function(err, data)
+    if data then stderr_buffer = stderr_buffer .. data end
   end)
 end
 

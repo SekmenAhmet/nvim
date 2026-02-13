@@ -1,62 +1,21 @@
-local uv = vim.uv
 local State = require("core.state")
 local icons = require("utils.icons")
 local ai = require("utils.ai")
+local process = require("utils.process")
 
 local M = {}
 
---- Executes a git command asynchronously
+--- Executes a git command asynchronously using the unified process engine
 --- @param args string[]
 --- @param cb function(code: number, stdout: string, stderr: string)
 --- @param stdin_data string?
 function M.git_exec(args, cb, stdin_data)
-  local stdout = uv.new_pipe(false)
-  local stderr = uv.new_pipe(false)
-  local stdout_data = {}
-  local stderr_data = {}
-  
   local repo_root = State.get("git.repo_root") or vim.fn.getcwd()
-  
-  local handle
-  local opts = {
+  process.exec("git", {
     args = args,
     cwd = repo_root,
-    stdio = { nil, stdout, stderr }
-  }
-
-  if stdin_data then
-    local stdin = uv.new_pipe(false)
-    opts.stdio[1] = stdin
-    handle = uv.spawn("git", opts, function(code)
-      if handle then handle:close() end
-      if stdout then stdout:close() end
-      if stderr then stderr:close() end
-      vim.schedule(function()
-        if cb then cb(code, table.concat(stdout_data), table.concat(stderr_data)) end
-      end)
-    end)
-    stdin:write(stdin_data, function() stdin:close() end)
-  else
-    handle = uv.spawn("git", opts, function(code)
-      if handle then handle:close() end
-      if stdout then stdout:close() end
-      if stderr then stderr:close() end
-      vim.schedule(function()
-        if cb then cb(code, table.concat(stdout_data), table.concat(stderr_data)) end
-      end)
-    end)
-  end
-
-  if stdout then
-    uv.read_start(stdout, function(err, data)
-      if data then table.insert(stdout_data, data) end
-    end)
-  end
-  if stderr then
-    uv.read_start(stderr, function(err, data)
-      if data then table.insert(stderr_data, data) end
-    end)
-  end
+    stdin = stdin_data
+  }, cb)
 end
 
 function M.refresh_status(cb)

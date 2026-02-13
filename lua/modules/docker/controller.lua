@@ -87,6 +87,7 @@ function M.setup_keymaps()
   for name, buf in pairs(bufs) do
     if api.nvim_buf_is_valid(buf) then
       local opts = { buffer = buf, silent = true }
+      vim.keymap.set({"n", "i", "v", "t"}, "<Esc>", M.toggle, opts)
       vim.keymap.set("n", "q", M.toggle, opts)
       vim.keymap.set("n", "<Tab>", function()
         local current = State.get("docker.active_tab") or 1

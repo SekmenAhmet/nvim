@@ -54,10 +54,10 @@ function M.layout()
   local sidebar_w = math.floor(total_w * Config.layout.sidebar_width)
   local preview_w = total_w - sidebar_w - 4
   
-  local h_commit = math.floor(total_h * Config.layout.heights.commit)
-  local h_files = math.floor(total_h * Config.layout.heights.files)
-  local h_branches = math.floor(total_h * Config.layout.heights.branches)
-  local h_stashes = total_h - h_commit - h_files - h_branches - 8
+  local h_commit = math.max(1, math.floor(total_h * Config.layout.heights.commit))
+  local h_files = math.max(1, math.floor(total_h * Config.layout.heights.files))
+  local h_branches = math.max(1, math.floor(total_h * Config.layout.heights.branches))
+  local h_stashes = math.max(1, total_h - h_commit - h_files - h_branches - 8)
 
   local function open_win(name, buf, r, c, w, h, title, focus)
     local cfg = {
@@ -80,6 +80,11 @@ function M.layout()
   open_win("branches", M.get_buf("branches", "gitbranch"), h_commit + h_files + 4, 0, sidebar_w, h_branches, "Branches")
   open_win("stashes",  M.get_buf("stashes", "git"), h_commit + h_files + h_branches + 6, 0, sidebar_w, h_stashes, "Stashes")
   open_win("preview",  M.get_buf("preview", "diff"), 0, sidebar_w + 2, preview_w, total_h - 2, "Preview (s:Stage, u:Unstage)")
+  
+  -- Apply strict UI mode to list panes
+  ui_utils.set_ui_mode(M.bufs.files, { win = M.wins.files })
+  ui_utils.set_ui_mode(M.bufs.branches, { win = M.wins.branches })
+  ui_utils.set_ui_mode(M.bufs.stashes, { win = M.wins.stashes })
   
   M.draw_all()
 end

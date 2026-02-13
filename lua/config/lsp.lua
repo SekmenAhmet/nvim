@@ -11,7 +11,16 @@ function M.on_attach(client, bufnr)
   vim.keymap.set("n", "gd", vim.lsp.buf.definition, opts)
   vim.keymap.set("n", "K", vim.lsp.buf.hover, opts)
   vim.keymap.set("n", "<leader>rn", vim.lsp.buf.rename, opts)
-  vim.keymap.set("n", "<leader>ca", vim.lsp.buf.code_action, opts)
+  
+  -- Use custom picker for code actions
+  vim.keymap.set("n", "<leader>ca", function()
+    require("modules.lsp.actions").open()
+  end, opts)
+  
+  -- Document Symbols Picker
+  vim.keymap.set("n", "<leader>ss", function()
+    require("modules.lsp.symbols").open()
+  end, opts)
 
   -- Native Completion
   if client.server_capabilities.completionProvider then
@@ -81,6 +90,15 @@ vim.api.nvim_create_autocmd("CursorHold", {
 
 M.capabilities = vim.lsp.protocol.make_client_capabilities()
 M.capabilities.textDocument.completion.completionItem.snippetSupport = true
+M.capabilities.textDocument.completion.completionItem.preselectSupport = true
+M.capabilities.textDocument.completion.completionItem.insertReplaceSupport = true
+M.capabilities.textDocument.completion.completionItem.labelDetailsSupport = true
+M.capabilities.textDocument.completion.completionItem.deprecatedSupport = true
+M.capabilities.textDocument.completion.completionItem.commitCharactersSupport = true
+M.capabilities.textDocument.completion.completionItem.tagSupport = { valueSet = { 1 } }
+M.capabilities.textDocument.completion.completionItem.resolveSupport = {
+  properties = { "documentation", "detail", "additionalTextEdits" },
+}
 
 -- Configuration par serveur
 M.server_settings = {
@@ -89,17 +107,23 @@ M.server_settings = {
       Lua = {
         runtime = {
           version = "LuaJIT",
+          path = vim.split(package.path, ";"),
         },
         diagnostics = {
-          globals = { "vim" },
+          globals = { "vim", "require" },
+          disable = { "lowercase-global" },
         },
         workspace = {
-          library = vim.api.nvim_get_runtime_file("", true),
           checkThirdParty = false,
+          library = {
+            vim.env.VIMRUNTIME,
+            vim.fn.stdpath("config") .. "/lua",
+          },
+          maxPreload = 10000,
+          preloadFileSize = 10000,
         },
-        telemetry = {
-          enable = false,
-        },
+        telemetry = { enable = false },
+        hint = { enable = true }, -- Enable inlay hints
       },
     },
   },

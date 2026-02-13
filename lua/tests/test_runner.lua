@@ -1,50 +1,63 @@
--- Native IDE Health & Test Runner
--- Validates modules and state management
+local runner = require("tests.runner")
 
-local function test_git()
-  print("Testing Git Client...")
-  local git = require("config.git")
-  if type(git.toggle) ~= "function" then error("Git toggle missing") end
-  print("✓ Git module loaded")
-end
+runner.run("Full IDE Module Validation", {
+  ["Utils: Process Engine"] = function(done)
+    local process = require("utils.process")
+    process.exec("echo", { args = { "test" } }, function(code, stdout)
+      done(code == 0 and stdout:match("test"), "Process engine failed")
+    end)
+  end,
 
-local function test_rest()
-  print("Testing REST Client...")
-  local rest = require("config.rest")
-  if type(rest.toggle) ~= "function" then error("REST toggle missing") end
-  print("✓ REST module loaded")
-end
+  ["Utils: UI Kit (Float)"] = function(done)
+    local ui = require("utils.ui")
+    local buf, win = ui.create_float({ width = 10, height = 5 })
+    local valid = vim.api.nvim_win_is_valid(win)
+    local modifiable = vim.bo[buf].modifiable
+    if valid then vim.api.nvim_win_close(win, true) end
+    done(valid and modifiable, "UI Float failed or not modifiable")
+  end,
 
-local function test_docker()
-  print("Testing Docker Client...")
-  local docker = require("config.docker")
-  if type(docker.toggle) ~= "function" then error("Docker toggle missing") end
-  print("✓ Docker module loaded")
-end
+  ["Module: Cmdline"] = function(done)
+    local cmd = require("config.cmdline")
+    local ok = pcall(cmd.open)
+    if ok then
+      local buf = vim.api.nvim_get_current_buf()
+      local mod = vim.bo[buf].modifiable
+      cmd.close()
+      done(mod, "Cmdline buffer not modifiable")
+    else
+      done(false, "Cmdline open failed")
+    end
+  end,
 
-local function test_state()
-  print("Testing Global State...")
-  local state = require("core.state")
-  state.set("git.branch", "test-branch")
-  if state.data.git.branch ~= "test-branch" then error("State set failed") end
-  print("✓ Global state working")
-end
+  ["Module: Project Manager"] = function(done)
+    local ok, project = pcall(require, "modules.project.controller")
+    done(ok and type(project.toggle) == "function", "Project module load failed")
+  end,
 
-local function run_all()
-  local ok, err = pcall(function()
-    test_state()
-    test_git()
-    test_rest()
-    test_docker()
-  end)
+  ["Module: AI"] = function(done)
+    local ok, ai = pcall(require, "utils.ai")
+    done(ok and type(ai.generate) == "function", "AI module load failed")
+  end,
 
-  if ok then
-    print("\n✨ All core modules are healthy!")
-    os.exit(0)
-  else
-    print("\n❌ Test failed: " .. tostring(err))
-    os.exit(1)
+  ["Module: LSP Extensions"] = function(done)
+    local ok1 = pcall(require, "modules.lsp.actions")
+    local ok2 = pcall(require, "modules.lsp.symbols")
+    done(ok1 and ok2, "LSP extensions load failed")
+  end,
+
+  ["Module: Picker Engine"] = function(done)
+    local picker = require("utils.picker")
+    local p = picker.new({ title = "Test" })
+    local ok = pcall(p.start, p)
+    if ok then p:close() end
+    done(ok, "Picker start failed")
+  end,
+
+  ["Module: Live Grep"] = function(done)
+    local grep = require("config.grep")
+    local ok = pcall(grep.open)
+    -- We can't easily test the async results here, but we check if it opens
+    done(ok, "Live Grep open failed")
   end
-end
-
-run_all()
+})

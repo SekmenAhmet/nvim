@@ -139,60 +139,66 @@ function M.layout()
   local rw = mw - ew
   local mh = math.floor(H * Config.ui.meta_pct)
 
-  local function win(k, b, r, c, w, h, title)
-    if w <= 1 then
-      if M.wins[k] and api.nvim_win_is_valid(M.wins[k]) then api.nvim_win_close(M.wins[k], true) end
-      M.wins[k] = nil
-      return
-    end
-    
-    local cfg = {
-      width = w - 2, height = h - 2, row = r, col = c,
-      title = " " .. title .. " ", title_pos = "left",
-      enter = false, buf = b
-    }
-    
-    if M.wins[k] and api.nvim_win_is_valid(M.wins[k]) then
-      api.nvim_win_set_config(M.wins[k], {
-        relative = "editor", row = cfg.row, col = cfg.col, width = cfg.width, height = cfg.height,
-        title = cfg.title, title_pos = cfg.title_pos
-      })
-      api.nvim_win_set_buf(M.wins[k], b)
-    else
-      local _, w_id = ui_utils.create_float(cfg)
-      M.wins[k] = w_id
-      vim.wo[M.wins[k]].winhl = "Normal:Normal,FloatBorder:" .. Config.hl.border .. ",WinBar:Normal,WinBarNC:Normal"
-    end
-    return M.wins[k]
-  end
-
-  win("side", M.get_buf("side", "rest_tree"), 0, 0, sw, H, "Collection")
-  win("meta", M.get_buf("meta", "conf"), 0, sw, ew, mh, "Request")
-  
   local active_tab = state.get("rest.active_tab") or 1
   local active_buf_key = Config.tabs[active_tab].name:lower()
   local input_buf = M.get_buf(active_buf_key, active_buf_key == "body" and "json" or "conf")
   
   local body_icon = (active_tab == 1) and "󰄬 Body" or "󰅜 Body"
   local headers_icon = (active_tab == 2) and "󰄬 Headers" or "󰈙 Headers"
-  local input_title = string.format(" %s  │  %s ", body_icon, headers_icon)
-  
-  win("input", input_buf, mh, sw, ew, H - mh, input_title)
+  local input_title = string.format("%s  │  %s", body_icon, headers_icon)
 
-  local resp_win = win("resp", M.get_buf("resp", "json"), 0, sw + ew, rw, H, "Response")
-  if resp_win then 
-    vim.wo[resp_win].winbar = "%!v:lua.require'modules.rest.view'.get_resp_winbar()"
-    vim.wo[resp_win].wrap = true
+  local layout = {
+    side = { 
+      width = sw, height = H, row = 0, col = 0, 
+      title = "Collection", filetype = "rest_tree", cursorline = true,
+      buf = M.bufs.side or M.get_buf("side", "rest_tree")
+    },
+    meta = { 
+      width = ew, height = mh, row = 0, col = sw, 
+      title = "Request", filetype = "conf",
+      buf = M.bufs.meta or M.get_buf("meta", "conf")
+    },
+    input = { 
+      width = ew, height = H - mh, row = mh, col = sw, 
+      title = input_title, filetype = active_buf_key == "body" and "json" or "conf",
+      buf = input_buf
+    },
+    resp = { 
+      width = rw, height = H, row = 0, col = sw + ew, 
+      title = "Response", filetype = "json",
+      buf = M.bufs.resp or M.get_buf("resp", "json")
+    }
+  }
+
+  local active_layout = {}
+  for k, v in pairs(layout) do if v.width > 1 then active_layout[k] = v end end
+  
+  for k, res in pairs(M.wins) do
+    if not active_layout[k] and res.win and api.nvim_win_is_valid(res.win) then
+      api.nvim_win_close(res.win, true)
+      M.wins[k] = nil
+    end
   end
 
-  if M.wins.side then vim.wo[M.wins.side].cursorline = true end
+  M.wins = ui_utils.layout_manager(active_layout, M.wins)
+  
+  if M.wins.side then
+    ui_utils.set_ui_mode(M.wins.side.buf, { win = M.wins.side.win })
+  end
+  
+  if M.wins.resp and api.nvim_win_is_valid(M.wins.resp.win) then
+    vim.wo[M.wins.resp.win].winbar = "%!v:lua.require'modules.rest.view'.get_resp_winbar()"
+    vim.wo[M.wins.resp.win].wrap = true
+  end
+  
+  for k, res in pairs(M.wins) do M.bufs[k] = res.buf end
 end
 
 function M.close()
-  for k, w in pairs(M.wins) do
-    if w and api.nvim_win_is_valid(w) then api.nvim_win_close(w, true) end
-    M.wins[k] = nil
+  for k, res in pairs(M.wins) do
+    if res.win and api.nvim_win_is_valid(res.win) then api.nvim_win_close(res.win, true) end
   end
+  M.wins = {}
 end
 
 return M

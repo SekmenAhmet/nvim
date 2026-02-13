@@ -63,7 +63,7 @@ function M.show()
   state.current_idx = 1
   
   -- Créer la fenêtre (style finder)
-  local wins = window.create_dual_pane({
+  local res = window.create_dual_pane({
     width_pct = 0.7,
     height_pct = 0.8,
     preview_width_pct = 0.6,
@@ -72,8 +72,9 @@ function M.show()
     list_filetype = "qf_list",
   })
   
-  state.buf = wins.buf_list
-  state.win = wins.win_list
+  state.buf = res.buf_list
+  state.win = res.win_list
+  state.win_preview = res.win_preview
   
   -- Remplir la liste
   local lines = {}
@@ -90,14 +91,18 @@ function M.show()
   -- Keymaps
   local opts = { buffer = state.buf }
   
+  local function close()
+    if state.win and api.nvim_win_is_valid(state.win) then api.nvim_win_close(state.win, true) end
+    if state.win_preview and api.nvim_win_is_valid(state.win_preview) then api.nvim_win_close(state.win_preview, true) end
+  end
+
   -- Enter: ouvrir et fermer
   vim.keymap.set("n", "<CR>", function()
     local cursor = api.nvim_win_get_cursor(state.win)
     local idx = cursor[1]
     local item = state.items[idx]
     if item then
-      -- Fermer puis ouvrir
-      api.nvim_win_close(state.win, true)
+      close()
       require("config.ui").open_in_normal_win(item.filename, item.lnum)
     end
   end, opts)
@@ -113,9 +118,8 @@ function M.show()
   end, opts)
   
   -- Esc: fermer
-  vim.keymap.set("n", "<Esc>", function()
-    api.nvim_win_close(state.win, true)
-  end, opts)
+  vim.keymap.set("n", "<Esc>", close, opts)
+  vim.keymap.set("n", "q", close, opts)
   
   -- d: supprimer de la liste
   vim.keymap.set("n", "d", function()

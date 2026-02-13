@@ -57,61 +57,49 @@ function M.run()
   vim.bo[br].modifiable = false
 
   local start_time = vim.uv.hrtime()
-  local out, dat = vim.uv.new_pipe(false), {}
-  local handle
+  local process = require("utils.process")
   
-  handle = vim.uv.spawn("curl", { args = args, stdio = { nil, out, nil } }, function(code, signal)
-    if out then out:read_stop(); out:close() end
-    if handle and not handle:is_closing() then handle:close() end
-    
+  process.exec("curl", { args = args }, function(code, stdout_content, stderr_content)
     local end_time = vim.uv.hrtime()
     local duration = (end_time - start_time) / 1000000
     local duration_str = string.format("%.0fms", duration)
     
-    local stdout_content = table.concat(dat)
-    vim.schedule(function()
-      state.set("rest.is_pending", false)
-      if not api.nvim_buf_is_valid(br) then return end
-      local parts = vim.split(stdout_content, "\r\n\r\n")
-      local header_part = parts[1] or ""
-      local body_idx = 2
-      while parts[body_idx] and parts[body_idx-1]:match("^HTTP/%d%.%d 100") do 
-        header_part = parts[body_idx]
-        body_idx = body_idx + 1 
-      end
-      
-      local body_cnt = table.concat({ unpack(parts, body_idx) }, "\n\n")
-      local status_code = header_part:match("^(HTTP/%d%.%d %d+ [^\n]*)") or header_part:match("^(HTTP/%d%.%d %d+)") or "Unknown"
-      
-      state.set("rest.response_meta", { status = status_code, time = duration_str })
-      state.set("rest.last_status", status_code)
-      M.response_headers = vim.split(header_part, "\n")
-      vim.cmd("redrawstatus")
-      
-      local function display(content)
-        if not api.nvim_buf_is_valid(br) then return end
-        vim.bo[br].modifiable = true
-        api.nvim_buf_set_lines(br, 0, -1, false, vim.split(content:gsub("\r", ""), "\n"))
-        vim.bo[br].modifiable = false
-      end
-
-      if fn.executable("jq") == 1 and body_cnt:match("%S") and body_cnt:match("^%s*[{%[]") then
-        vim.system({ "jq", "." }, { stdin = body_cnt }, function(obj)
-          vim.schedule(function()
-            if obj.code == 0 then display(obj.stdout) else display(body_cnt) end
-          end)
-        end)
-      else
-        display(body_cnt)
-      end
-    end)
-  end)
-  
-  if handle then 
-    out:read_start(function(err, d) if d then table.insert(dat, d) end end) 
-  else
     state.set("rest.is_pending", false)
-  end
+    if not api.nvim_buf_is_valid(br) then return end
+    
+    local parts = vim.split(stdout_content, "\r\n\r\n")
+    local header_part = parts[1] or ""
+    local body_idx = 2
+    while parts[body_idx] and parts[body_idx-1]:match("^HTTP/%d%.%d 100") do 
+      header_part = parts[body_idx]
+      body_idx = body_idx + 1 
+    end
+    
+    local body_cnt = table.concat({ unpack(parts, body_idx) }, "\n\n")
+    local status_code = header_part:match("^(HTTP/%d%.%d %d+ [^\n]*)") or header_part:match("^(HTTP/%d%.%d %d+)") or "Unknown"
+    
+    state.set("rest.response_meta", { status = status_code, time = duration_str })
+    state.set("rest.last_status", status_code)
+    M.response_headers = vim.split(header_part, "\n")
+    vim.cmd("redrawstatus")
+    
+    local function display(content)
+      if not api.nvim_buf_is_valid(br) then return end
+      vim.bo[br].modifiable = true
+      api.nvim_buf_set_lines(br, 0, -1, false, vim.split(content:gsub("\r", ""), "\n"))
+      vim.bo[br].modifiable = false
+    end
+
+    if fn.executable("jq") == 1 and body_cnt:match("%S") and body_cnt:match("^%s*[{%[]") then
+      vim.system({ "jq", "." }, { stdin = body_cnt }, function(obj)
+        vim.schedule(function()
+          if obj.code == 0 then display(obj.stdout) else display(body_cnt) end
+        end)
+      end)
+    else
+      display(body_cnt)
+    end
+  end)
 end
 
 function M.switch_tab(dir)
@@ -182,7 +170,7 @@ end
 
 function M.map_buffer(b)
   local o = { buffer = b, silent = true, nowait = true }
-  vim.keymap.set("n", "<Esc>", M.close, o)
+  vim.keymap.set({"n", "i", "v", "t"}, "<Esc>", M.close, o)
   vim.keymap.set("n", "q", M.close, o)
   
   vim.keymap.set({"n", "i"}, "<Tab>", function() M.switch_tab(1) end, o)
@@ -208,38 +196,43 @@ function M.map_buffer(b)
        api.nvim_buf_set_lines(br, 0, -1, false, M.response_headers)
        M.showing_headers = true
     end
-        vim.bo[br].modifiable = false
-      end, o)
+    vim.bo[br].modifiable = false
+  end, o)
     
-      -- Sidebar Toggle
-      vim.keymap.set({ "n", "i" }, "<C-b>", function()
-        if view.wins.side and not api.nvim_win_is_valid(view.wins.side) then
-          state.set("rest.side_open", false)
-          view.wins.side = nil
-        end
+  -- Sidebar Toggle
+  vim.keymap.set({ "n", "i" }, "<C-b>", function()
+    if view.wins.side and not api.nvim_win_is_valid(view.wins.side.win) then
+      state.set("rest.side_open", false)
+      view.wins.side = nil
+    end
+
+    local current = state.get("rest.side_open")
+    state.set("rest.side_open", not current)
+    view.layout()
     
-        local current = state.get("rest.side_open")
-        state.set("rest.side_open", not current)
-        view.layout()
-        
-        if not current and view.wins.side and api.nvim_win_is_valid(view.wins.side) then
-          api.nvim_set_current_win(view.wins.side)
-        end
-      end, o)
-    
-      -- Nav
-      vim.keymap.set({ "n", "i" }, "<C-h>", function() 
-        if view.wins.side and api.nvim_win_is_valid(view.wins.side) then
-          api.nvim_set_current_win(view.wins.side)
-        end
-      end, o)  vim.keymap.set({ "n", "i" }, "<C-l>", function() 
-    local cur = api.nvim_get_current_win()
-    if cur == view.wins.side then api.nvim_set_current_win(view.wins.meta)
-    elseif cur == view.wins.meta or cur == view.wins.input then api.nvim_set_current_win(view.wins.resp)
+    if not current and view.wins.side and api.nvim_win_is_valid(view.wins.side.win) then
+      api.nvim_set_current_win(view.wins.side.win)
     end
   end, o)
-  vim.keymap.set({ "n", "i" }, "<C-k>", function() api.nvim_set_current_win(view.wins.meta) end, o)
-  vim.keymap.set({ "n", "i" }, "<C-j>", function() api.nvim_set_current_win(view.wins.input) end, o)
+
+  -- Nav
+  vim.keymap.set({ "n", "i" }, "<C-h>", function() 
+    if view.wins.side and api.nvim_win_is_valid(view.wins.side.win) then
+      api.nvim_set_current_win(view.wins.side.win)
+    end
+  end, o)
+  
+  vim.keymap.set({ "n", "i" }, "<C-l>", function() 
+    local cur = api.nvim_get_current_win()
+    if view.wins.side and cur == view.wins.side.win then 
+      if view.wins.meta then api.nvim_set_current_win(view.wins.meta.win) end
+    elseif view.wins.meta and (cur == view.wins.meta.win or (view.wins.input and cur == view.wins.input.win)) then 
+      if view.wins.resp then api.nvim_set_current_win(view.wins.resp.win) end
+    end
+  end, o)
+
+  vim.keymap.set({ "n", "i" }, "<C-k>", function() if view.wins.meta then api.nvim_set_current_win(view.wins.meta.win) end end, o)
+  vim.keymap.set({ "n", "i" }, "<C-j>", function() if view.wins.input then api.nvim_set_current_win(view.wins.input.win) end end, o)
 
   api.nvim_create_autocmd("BufWriteCmd", {
     buffer = b, group = AU_GROUP, callback = function() M.sync(); model.save(); vim.bo[b].modified = false end,
@@ -306,7 +299,9 @@ function M.toggle()
           view.draw_side()
         else 
           M.load_node(it.n)
-          if view.wins.meta then api.nvim_set_current_win(view.wins.meta) end 
+          if view.wins.meta and api.nvim_win_is_valid(view.wins.meta.win) then 
+            api.nvim_set_current_win(view.wins.meta.win) 
+          end 
         end
       end
     end, side_opts)
@@ -324,8 +319,8 @@ function M.toggle()
     if req and req.type == "folder" and req.children then req = req.children[1] end
     if req then M.load_node(req) end
 
-    if view.wins.meta and api.nvim_win_is_valid(view.wins.meta) then
-      api.nvim_set_current_win(view.wins.meta)
+    if view.wins.meta and api.nvim_win_is_valid(view.wins.meta.win) then
+      api.nvim_set_current_win(view.wins.meta.win)
     end
   end)
 end
