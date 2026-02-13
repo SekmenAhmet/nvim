@@ -106,7 +106,14 @@ function M.refresh_stashes(cb)
 end
 
 function M.refresh_log(cb)
-  M.git_exec({ "log", "--oneline", "--graph", "--all", "--color=never", "-n", "100" }, function(code, out)
+  M.git_exec({ 
+    "log", 
+    "--graph", 
+    "--all", 
+    "--format=format:DELIM%an|%d|%s", 
+    "--color=never", 
+    "-n", "100" 
+  }, function(code, out)
     local commits = {}
     local lines = vim.split(out, "\n", { trimempty = true })
     for _, line in ipairs(lines) do

@@ -359,7 +359,7 @@ function Picker:spawn(cmd, args, on_data, on_exit)
   local stderr = uv.new_pipe(false)
   local stderr_buffer = ""
 
-  self.state.job_handle = uv.spawn(cmd, {
+  self.state.job_handle, _ = uv.spawn(cmd, {
     args = args,
     stdio = { nil, stdout, stderr },
   }, function(code, signal)
@@ -378,6 +378,12 @@ function Picker:spawn(cmd, args, on_data, on_exit)
     end
     if on_exit then on_exit(code) end
   end)
+
+  if not self.state.job_handle then
+    if stdout then stdout:close() end
+    if stderr then stderr:close() end
+    return
+  end
 
   local buffer = ""
   stdout:read_start(function(err, data)

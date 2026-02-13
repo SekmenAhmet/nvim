@@ -23,14 +23,14 @@ function M.sync()
   local n = model.find_node(req_id)
   if not n then return end
   
-  if view.bufs.meta and api.nvim_buf_is_valid(view.bufs.meta) then
-    n.meta = api.nvim_buf_get_lines(view.bufs.meta, 0, -1, false)
+  if view.components.meta and api.nvim_buf_is_valid(view.components.meta.buf) then
+    n.meta = api.nvim_buf_get_lines(view.components.meta.buf, 0, -1, false)
   end
-  if view.bufs.body and api.nvim_buf_is_valid(view.bufs.body) then
-    n.body = api.nvim_buf_get_lines(view.bufs.body, 0, -1, false)
+  if view.components.body and api.nvim_buf_is_valid(view.components.body.buf) then
+    n.body = api.nvim_buf_get_lines(view.components.body.buf, 0, -1, false)
   end
-  if view.bufs.headers and api.nvim_buf_is_valid(view.bufs.headers) then
-    n.headers = api.nvim_buf_get_lines(view.bufs.headers, 0, -1, false)
+  if view.components.headers and api.nvim_buf_is_valid(view.components.headers.buf) then
+    n.headers = api.nvim_buf_get_lines(view.components.headers.buf, 0, -1, false)
   end
 end
 
@@ -51,7 +51,7 @@ function M.run()
   state.set("rest.response_meta", { status = "Pending...", time = "0ms" })
   vim.cmd("redrawstatus")
 
-  local br = view.get_buf("resp", "json")
+  local br = view.components.resp.buf
   vim.bo[br].modifiable = true
   api.nvim_buf_set_lines(br, 0, -1, false, { "" })
   vim.bo[br].modifiable = false
@@ -122,11 +122,11 @@ function M.load_node(node)
   else
     state.set("rest.req_id", nil)
   end
-  api.nvim_buf_set_lines(view.get_buf("meta", "conf"), 0, -1, false, m)
-  api.nvim_buf_set_lines(view.get_buf("body", "json"), 0, -1, false, b)
-  api.nvim_buf_set_lines(view.get_buf("headers", "conf"), 0, -1, false, h)
+  api.nvim_buf_set_lines(view.components.meta.buf, 0, -1, false, m)
+  api.nvim_buf_set_lines(view.components.body.buf, 0, -1, false, b)
+  api.nvim_buf_set_lines(view.components.headers.buf, 0, -1, false, h)
   
-  local r = view.get_buf("resp", "json")
+  local r = view.components.resp.buf
   vim.bo[r].modifiable = true
   api.nvim_buf_set_lines(r, 0, -1, false, {})
   vim.bo[r].modifiable = false
@@ -170,6 +170,7 @@ end
 
 function M.map_buffer(b)
   local o = { buffer = b, silent = true, nowait = true }
+  vim.keymap.set({"n", "i", "v", "t"}, "<C-p>", M.close, o)
   vim.keymap.set({"n", "i", "v", "t"}, "<Esc>", M.close, o)
   vim.keymap.set("n", "q", M.close, o)
   
@@ -183,7 +184,7 @@ function M.map_buffer(b)
 
   -- Response Toggle (Body/Headers)
   vim.keymap.set({ "n" }, "H", function()
-    local br = view.bufs.resp
+    local br = view.components.resp.buf
     if not br or not api.nvim_buf_is_valid(br) then return end
     vim.bo[br].modifiable = true
     if M.showing_headers then
@@ -201,38 +202,39 @@ function M.map_buffer(b)
     
   -- Sidebar Toggle
   vim.keymap.set({ "n", "i" }, "<C-b>", function()
-    if view.wins.side and not api.nvim_win_is_valid(view.wins.side.win) then
+    local side_comp = view.components.side
+    if side_comp.win and not api.nvim_win_is_valid(side_comp.win) then
       state.set("rest.side_open", false)
-      view.wins.side = nil
+      side_comp.win = -1
     end
 
     local current = state.get("rest.side_open")
     state.set("rest.side_open", not current)
     view.layout()
     
-    if not current and view.wins.side and api.nvim_win_is_valid(view.wins.side.win) then
-      api.nvim_set_current_win(view.wins.side.win)
+    if not current and side_comp.win and api.nvim_win_is_valid(side_comp.win) then
+      api.nvim_set_current_win(side_comp.win)
     end
   end, o)
 
   -- Nav
   vim.keymap.set({ "n", "i" }, "<C-h>", function() 
-    if view.wins.side and api.nvim_win_is_valid(view.wins.side.win) then
-      api.nvim_set_current_win(view.wins.side.win)
+    if view.components.side.win and api.nvim_win_is_valid(view.components.side.win) then
+      api.nvim_set_current_win(view.components.side.win)
     end
   end, o)
   
   vim.keymap.set({ "n", "i" }, "<C-l>", function() 
     local cur = api.nvim_get_current_win()
-    if view.wins.side and cur == view.wins.side.win then 
-      if view.wins.meta then api.nvim_set_current_win(view.wins.meta.win) end
+    if view.components.side.win and cur == view.components.side.win then 
+      if view.wins.meta and api.nvim_win_is_valid(view.wins.meta.win) then api.nvim_set_current_win(view.wins.meta.win) end
     elseif view.wins.meta and (cur == view.wins.meta.win or (view.wins.input and cur == view.wins.input.win)) then 
-      if view.wins.resp then api.nvim_set_current_win(view.wins.resp.win) end
+      if view.wins.resp and api.nvim_win_is_valid(view.wins.resp.win) then api.nvim_set_current_win(view.wins.resp.win) end
     end
   end, o)
 
-  vim.keymap.set({ "n", "i" }, "<C-k>", function() if view.wins.meta then api.nvim_set_current_win(view.wins.meta.win) end end, o)
-  vim.keymap.set({ "n", "i" }, "<C-j>", function() if view.wins.input then api.nvim_set_current_win(view.wins.input.win) end end, o)
+  vim.keymap.set({ "n", "i" }, "<C-k>", function() if view.wins.meta and api.nvim_win_is_valid(view.wins.meta.win) then api.nvim_set_current_win(view.wins.meta.win) end end, o)
+  vim.keymap.set({ "n", "i" }, "<C-j>", function() if view.wins.input and api.nvim_win_is_valid(view.wins.input.win) then api.nvim_set_current_win(view.wins.input.win) end end, o)
 
   api.nvim_create_autocmd("BufWriteCmd", {
     buffer = b, group = AU_GROUP, callback = function() M.sync(); model.save(); vim.bo[b].modified = false end,
@@ -245,7 +247,7 @@ function M.map_buffer(b)
   end
 
   -- Header-specific mappings
-  if b == view.bufs.headers then
+  if b == view.components.headers.buf then
     vim.keymap.set("i", "<Tab>", function()
       local line = api.nvim_get_current_line()
       local _, col = unpack(api.nvim_win_get_cursor(0))
@@ -269,7 +271,7 @@ function M.toggle()
   model.init(function()
     if not state.get("rest.is_active") then return end
 
-    local side_buf = view.get_buf("side", "rest_tree")
+    local side_buf = view.components.side.buf
     M.map_buffer(side_buf)
     
     local side_opts = { buffer = side_buf, silent = true }
@@ -306,10 +308,10 @@ function M.toggle()
       end
     end, side_opts)
 
-    M.map_buffer(view.get_buf("meta", "conf"))
-    M.map_buffer(view.get_buf("body", "json"))
-    M.map_buffer(view.get_buf("headers", "conf"))
-    M.map_buffer(view.get_buf("resp", "json"))
+    M.map_buffer(view.components.meta.buf)
+    M.map_buffer(view.components.body.buf)
+    M.map_buffer(view.components.headers.buf)
+    M.map_buffer(view.components.resp.buf)
 
     view.layout()
     view.draw_side()

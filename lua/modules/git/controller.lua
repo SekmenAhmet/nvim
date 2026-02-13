@@ -33,7 +33,8 @@ function M.setup_autocmds()
   
   local panes = { "commit", "files", "branches", "stashes", "preview" }
   for _, pane in ipairs(panes) do
-    local buf = View.bufs[pane]
+    local component = View.components[pane]
+    local buf = component and component.buf
     if buf and api.nvim_buf_is_valid(buf) then
       api.nvim_create_autocmd("CursorMoved", {
         buffer = buf,
@@ -82,20 +83,25 @@ function M.switch_pane(target)
 end
 
 function M.setup_keymaps()
-  local panes = { "commit", "files", "branches", "stashes", "preview" }
+  local panes = { "commit", "files", "branches", "stashes", "preview", "log" }
   for _, pane in ipairs(panes) do
-    local buf = View.bufs[pane]
+    local component = View.components[pane]
+    local buf = component and component.buf
     if buf and api.nvim_buf_is_valid(buf) then
       local opts = { buffer = buf, silent = true }
       
-      -- Global Git Actions
-      vim.keymap.set("n", "q", M.toggle, opts)
+      -- Global Git Actions (Toggles)
+      vim.keymap.set({"n", "i", "v", "t"}, "<C-g>", M.toggle, opts)
       vim.keymap.set({"n", "i", "v", "t"}, "<Esc>", M.toggle, opts)
+      vim.keymap.set("n", "q", M.toggle, opts)
+      
+      -- Secondary Toggles
+      vim.keymap.set({"n", "i", "v", "t"}, "<C-b>", View.toggle_log, opts)
+      
       vim.keymap.set("n", "<Tab>", function() M.switch_pane() end, opts)
       vim.keymap.set("n", "r", M.refresh, opts)
       vim.keymap.set("n", "P", function() Model.push(M.refresh) end, opts)
       vim.keymap.set("n", "p", function() Model.pull(M.refresh) end, opts)
-      vim.keymap.set("n", "<C-b>", View.toggle_log, opts)
       
       -- Navigation
       vim.keymap.set("n", "<C-l>", function() M.switch_pane("preview") end, opts)
@@ -175,7 +181,7 @@ function M.setup_keymaps()
 end
 
 function M.handle_hunk(reverse)
-  local buf = View.bufs.preview
+  local buf = View.components.preview.buf
   local lines = api.nvim_buf_get_lines(buf, 0, -1, false)
   local cursor_line = api.nvim_win_get_cursor(0)[1]
   

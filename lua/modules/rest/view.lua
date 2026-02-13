@@ -1,12 +1,10 @@
 local state = require("core.state")
 local ui_utils = require("utils.ui")
 local model = require("modules.rest.model")
+local ViewFactory = require("utils.view_factory")
 
 local M = {}
 local api = vim.api
-
-M.bufs = {}
-M.wins = {}
 
 local Config = {
   ui = { side_pct = 0.22, meta_pct = 0.12 },
@@ -26,27 +24,20 @@ local Config = {
   }
 }
 
-function M.get_buf(k, ft)
-  if M.bufs[k] and api.nvim_buf_is_valid(M.bufs[k]) then return M.bufs[k] end
-  
-  local name = "REST_" .. k:upper()
-  local existing = vim.fn.bufnr(name)
-  local b
-  
-  if existing ~= -1 and api.nvim_buf_is_valid(existing) then
-    b = existing
-  else
-    b = api.nvim_create_buf(false, true)
-    pcall(api.nvim_buf_set_name, b, name)
-  end
-  
-  vim.bo[b].filetype = ft
-  if k == "resp" then vim.bo[b].buftype = "nofile" else vim.bo[b].buftype = "acwrite" end
-  
-  api.nvim_buf_call(b, function() 
+M.wins = {}
+M.components = {
+  side    = ViewFactory.create_component("REST_SIDE",    { filetype = "rest_tree" }),
+  meta    = ViewFactory.create_component("REST_META",    { filetype = "conf", buftype = "acwrite" }),
+  body    = ViewFactory.create_component("REST_BODY",    { filetype = "json", buftype = "acwrite" }),
+  headers = ViewFactory.create_component("REST_HEADERS", { filetype = "conf", buftype = "acwrite" }),
+  resp    = ViewFactory.create_component("REST_RESP",    { filetype = "json" })
+}
+
+-- Initial syntax for specific components
+for k, comp in pairs(M.components) do
+  api.nvim_buf_call(comp.buf, function()
     vim.cmd([[syn match RestVar /{{.\{-}}}/]])
     vim.cmd("hi def link RestVar "..Config.hl.var) 
-    
     if k == "meta" then
       vim.cmd([[syn match RestMethod /^\(GET\|POST\|PUT\|PATCH\|DELETE\|HEAD\|OPTIONS\)/]])
       vim.cmd([[syn match RestUrl /https\?:\/\/[^ ]\+/]])
@@ -57,14 +48,9 @@ function M.get_buf(k, ft)
        vim.cmd([[hi def link RestHeaderKey Type]])
     end
   end)
-  
-  M.bufs[k] = b
-  return b
 end
 
 function M.draw_side()
-  local b = M.bufs.side
-  if not b or not api.nvim_buf_is_valid(b) then return end
   local flat = model.get_flat()
   local l, h = {}, {}
   local req_id = state.get("rest.req_id")
@@ -81,16 +67,16 @@ function M.draw_side()
     table.insert(l, prefix .. pre .. icon .. it.n.name)
     
     local g = it.n.type == "folder" and Config.hl.dir or Config.hl.file
-    table.insert(h, { r = i - 1, s = 0, e = -1, g = g })
+    table.insert(h, { line = i - 1, col_start = 0, col_end = -1, group = g })
     
     if is_active then
-      table.insert(h, { r = i - 1, s = 0, e = 3, g = Config.hl.active_icon })
+      table.insert(h, { line = i - 1, col_start = 0, col_end = 3, group = Config.hl.active_icon })
     end
     
     -- Highlight tree guides
     for k = 1, it.d do
        local guide_start = 3 + 1 + (k-1)*4 
-       table.insert(h, { r = i - 1, s = guide_start, e = guide_start + 3, g = Config.hl.tab_norm })
+       table.insert(h, { line = i - 1, col_start = guide_start, col_end = guide_start + 3, group = Config.hl.tab_norm })
     end
 
     if it.n.type == "request" then
@@ -98,18 +84,15 @@ function M.draw_side()
       local current_line_len = #l[#l]
       local name_len = #it.n.name
       local method_start = current_line_len - name_len - icon_len
-      table.insert(h, { r = i - 1, s = method_start, e = method_start + icon_len, g = Config.hl.method })
+      table.insert(h, { line = i - 1, col_start = method_start, col_end = method_start + icon_len, group = Config.hl.method })
     end
   end
-  vim.bo[b].modifiable = true
-  api.nvim_buf_set_lines(b, 0, -1, false, l)
-  vim.bo[b].modifiable = false
-  api.nvim_buf_clear_namespace(b, -1, 0, -1)
-  for _, v in ipairs(h) do api.nvim_buf_add_highlight(b, -1, v.g, v.r, v.s, v.e) end
+  
+  ViewFactory.render(M.components.side, l, h)
 end
 
 function M.get_resp_winbar()
-  local meta = state.get("rest.response_meta")
+  local meta = state.get("rest.response_meta") or {}
   local s = meta.status or ""
   local t = meta.time or ""
   local env = (state.get("rest.env_name") or "local"):upper()
@@ -141,37 +124,37 @@ function M.layout()
 
   local active_tab = state.get("rest.active_tab") or 1
   local active_buf_key = Config.tabs[active_tab].name:lower()
-  local input_buf = M.get_buf(active_buf_key, active_buf_key == "body" and "json" or "conf")
+  local input_component = M.components[active_buf_key]
   
   local body_icon = (active_tab == 1) and "󰄬 Body" or "󰅜 Body"
   local headers_icon = (active_tab == 2) and "󰄬 Headers" or "󰈙 Headers"
   local input_title = string.format("%s  │  %s", body_icon, headers_icon)
 
-  local layout = {
+  local layout_config = {
     side = { 
       width = sw, height = H, row = 0, col = 0, 
       title = "Collection", filetype = "rest_tree", cursorline = true,
-      buf = M.bufs.side or M.get_buf("side", "rest_tree")
+      buf = M.components.side.buf
     },
     meta = { 
       width = ew, height = mh, row = 0, col = sw, 
       title = "Request", filetype = "conf",
-      buf = M.bufs.meta or M.get_buf("meta", "conf")
+      buf = M.components.meta.buf
     },
     input = { 
       width = ew, height = H - mh, row = mh, col = sw, 
       title = input_title, filetype = active_buf_key == "body" and "json" or "conf",
-      buf = input_buf
+      buf = input_component.buf
     },
     resp = { 
       width = rw, height = H, row = 0, col = sw + ew, 
       title = "Response", filetype = "json",
-      buf = M.bufs.resp or M.get_buf("resp", "json")
+      buf = M.components.resp.buf
     }
   }
 
   local active_layout = {}
-  for k, v in pairs(layout) do if v.width > 1 then active_layout[k] = v end end
+  for k, v in pairs(layout_config) do if v.width > 1 then active_layout[k] = v end end
   
   for k, res in pairs(M.wins) do
     if not active_layout[k] and res.win and api.nvim_win_is_valid(res.win) then
@@ -182,16 +165,19 @@ function M.layout()
 
   M.wins = ui_utils.layout_manager(active_layout, M.wins)
   
-  if M.wins.side then
-    ui_utils.set_ui_mode(M.wins.side.buf, { win = M.wins.side.win })
+  -- Sync window handles and apply rules
+  for k, res in pairs(M.wins) do
+    local comp = (k == "input") and input_component or M.components[k]
+    if comp then 
+      comp.win = res.win 
+      if k == "side" then ViewFactory.apply_ui_rules(comp, { mode = "strict" }) end
+    end
   end
   
   if M.wins.resp and api.nvim_win_is_valid(M.wins.resp.win) then
     vim.wo[M.wins.resp.win].winbar = "%!v:lua.require'modules.rest.view'.get_resp_winbar()"
     vim.wo[M.wins.resp.win].wrap = true
   end
-  
-  for k, res in pairs(M.wins) do M.bufs[k] = res.buf end
 end
 
 function M.close()

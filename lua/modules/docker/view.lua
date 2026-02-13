@@ -2,6 +2,7 @@ local api = vim.api
 local State = require("core.state")
 local ui_utils = require("utils.ui")
 local icons = require("utils.icons").ui
+local ViewFactory = require("utils.view_factory")
 
 local M = {}
 
@@ -23,19 +24,12 @@ local Config = {
 }
 
 M.wins = {}
-M.bufs = {}
-
-function M.get_buf(name, ft)
-  local n = "DOCKER_" .. name:upper()
-  local b = vim.fn.bufnr(n)
-  if b == -1 or not api.nvim_buf_is_valid(b) then
-    b = api.nvim_create_buf(false, true)
-    pcall(api.nvim_buf_set_name, b, n)
-  end
-  M.bufs[name] = b
-  vim.bo[b].filetype = ft or "text"
-  return b
-end
+M.components = {
+  side = ViewFactory.create_component("DOCKER_SIDE", { filetype = "docker_tree" }),
+  meta = ViewFactory.create_component("DOCKER_META", { filetype = "docker_info" }),
+  logs = ViewFactory.create_component("DOCKER_LOGS", { filetype = "docker_logs" }),
+  term = ViewFactory.create_component("DOCKER_TERM", { filetype = "docker_term" })
+}
 
 function M.layout()
   local is_active = State.get("docker.is_active")
@@ -57,32 +51,30 @@ function M.layout()
     side = { 
       width = sw, height = H, row = 0, col = 0, 
       title = side_title, filetype = "docker_tree", cursorline = true,
-      buf = M.bufs.side
+      buf = M.components.side.buf
     },
     meta = { 
       width = mw, height = mh, row = 0, col = sw, 
       title = "Details", filetype = "docker_info",
-      buf = M.bufs.meta
+      buf = M.components.meta.buf
     },
     main = { 
       width = mw, height = H - mh, row = mh, col = sw, 
       title = string.format("%s  │  %s", t1, t2),
       filetype = active_tab == 1 and "docker_logs" or "docker_term",
-      buf = active_tab == 1 and M.get_buf("logs") or M.get_buf("term")
+      buf = active_tab == 1 and M.components.logs.buf or M.components.term.buf
     }
   }, M.wins)
   
-  -- Apply strict UI mode to sidebar
-  ui_utils.set_ui_mode(M.wins.side.buf, { win = M.wins.side.win })
+  -- Sync window handles back to components
+  for k, res in pairs(M.wins) do
+    if M.components[k] then M.components[k].win = res.win end
+  end
   
-  -- Update M.bufs from results
-  for k, res in pairs(M.wins) do M.bufs[k] = res.buf end
+  ui_utils.set_ui_mode(M.components.side.buf, { win = M.wins.side.win })
 end
 
 function M.draw_side()
-  local b = M.bufs.side
-  if not b or not api.nvim_buf_is_valid(b) then return end
-  
   local entity_type = State.get("docker.entity_type") or "containers"
   local entities = State.get("docker.entities." .. entity_type) or {}
   local selected_id = State.get("docker.selected_id")
@@ -111,22 +103,13 @@ function M.draw_side()
     
     local prefix = (selected_id == (entity.id or entity.name)) and "→ " or "  "
     table.insert(lines, prefix .. icon .. text)
-    table.insert(hl, { g = color, l = i-1, s = #prefix, e = #prefix + #icon })
+    table.insert(hl, { group = color, line = i-1, col_start = #prefix, col_end = #prefix + #icon })
   end
   
-  vim.bo[b].modifiable = true
-  api.nvim_buf_set_lines(b, 0, -1, false, lines)
-  vim.bo[b].modifiable = false
-  api.nvim_buf_clear_namespace(b, -1, 0, -1)
-  for _, h in ipairs(hl) do
-    api.nvim_buf_add_highlight(b, -1, h.g, h.l, h.s, h.e)
-  end
+  ViewFactory.render(M.components.side, lines, hl)
 end
 
 function M.draw_meta(stats)
-  local b = M.bufs.meta
-  if not b or not api.nvim_buf_is_valid(b) then return end
-  
   local entity_type = State.get("docker.entity_type") or "containers"
   local entities = State.get("docker.entities." .. entity_type) or {}
   local selected_id = State.get("docker.selected_id")
@@ -139,7 +122,7 @@ function M.draw_meta(stats)
     end
   end
   
-  local lines = {}
+  local lines, hl = {}, {}
   if entity then
     if entity_type == "containers" then
       lines = { 
@@ -167,13 +150,11 @@ function M.draw_meta(stats)
     lines = { "  Select an item to see details..." }
   end
   
-  vim.bo[b].modifiable = true
-  api.nvim_buf_set_lines(b, 0, -1, false, lines)
-  vim.bo[b].modifiable = false
-  api.nvim_buf_clear_namespace(b, -1, 0, -1)
   for i=0, #lines-1 do
-    api.nvim_buf_add_highlight(b, -1, Config.hl.label, i, 0, 10)
+    table.insert(hl, { group = Config.hl.label, line = i, col_start = 0, col_end = 10 })
   end
+  
+  ViewFactory.render(M.components.meta, lines, hl)
 end
 
 function M.close()

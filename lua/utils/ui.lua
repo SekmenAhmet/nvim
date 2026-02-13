@@ -183,8 +183,17 @@ function M.notify(msg, level, opts)
   vim.wo[win].winhl = "NormalFloat:Normal,FloatBorder:" .. config.hl
   
   table.insert(notifications, { win = win, buf = buf })
+  local current_notification = notifications[#notifications]
+
   vim.defer_fn(function()
     if api.nvim_win_is_valid(win) then api.nvim_win_close(win, true) end
+    -- Remove from notifications table
+    for i, n in ipairs(notifications) do
+      if n == current_notification then
+        table.remove(notifications, i)
+        break
+      end
+    end
   end, opts.timeout or 3000)
 end
 

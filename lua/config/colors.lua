@@ -183,10 +183,13 @@ function M.setup()
   set("GitBranchLocal", { fg = c.blue })
   set("GitBranchRemote", { fg = c.purple })
   set("GitStashId", { fg = c.purple, bold = true })
-  set("GitLogGraph", { fg = c.fg_gutter })
-  set("GitLogHash", { fg = c.orange, bold = true })
-  set("GitLogRef", { fg = c.blue })
+  set("GitLogGraph", { fg = c.purple })
+  set("GitLogHash", { fg = c.yellow })
+  set("GitLogRef", { fg = c.cyan, bold = true })
   set("GitLogHead", { fg = c.green, bold = true })
+  set("GitLogDate", { fg = c.comment })
+  set("GitLogAuthor", { fg = c.blue })
+  set("GitLogMsg", { fg = c.fg })
 
 end
 

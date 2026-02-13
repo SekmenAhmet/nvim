@@ -62,11 +62,14 @@ function M.stop_refresh_timer()
 end
 
 function M.setup_autocmds()
-  local side_buf = View.bufs.side
-  if not side_buf or not api.nvim_buf_is_valid(side_buf) then return end
+  local side_comp = View.components.side
+  if not side_comp or not api.nvim_buf_is_valid(side_comp.buf) then return end
+  
+  local augroup = api.nvim_create_augroup("DockerController", { clear = true })
   
   api.nvim_create_autocmd("CursorMoved", {
-    buffer = side_buf,
+    buffer = side_comp.buf,
+    group = augroup,
     callback = function()
       local idx = api.nvim_win_get_cursor(0)[1]
       local entity_type = State.get("docker.entity_type") or "containers"
@@ -80,13 +83,30 @@ function M.setup_autocmds()
       end
     end
   })
+
+  -- Handle WinClosed to cleanup state and timer if a main window is closed manually
+  local side_win = side_comp.win
+  if side_win and api.nvim_win_is_valid(side_win) then
+    api.nvim_create_autocmd("WinClosed", {
+      pattern = tostring(side_win),
+      group = augroup,
+      callback = function()
+        if State.get("docker.is_active") then
+          State.set("docker.is_active", false)
+          M.stop_refresh_timer()
+          View.close()
+        end
+      end
+    })
+  end
 end
 
 function M.setup_keymaps()
-  local bufs = View.bufs
-  for name, buf in pairs(bufs) do
+  for _, component in pairs(View.components) do
+    local buf = component.buf
     if api.nvim_buf_is_valid(buf) then
       local opts = { buffer = buf, silent = true }
+      vim.keymap.set({"n", "i", "v", "t"}, "<C-d>", M.toggle, opts)
       vim.keymap.set({"n", "i", "v", "t"}, "<Esc>", M.toggle, opts)
       vim.keymap.set("n", "q", M.toggle, opts)
       vim.keymap.set("n", "<Tab>", function()
@@ -100,8 +120,17 @@ function M.setup_keymaps()
       vim.keymap.set("n", "V", function() State.set("docker.entity_type", "volumes") end, opts)
       
       -- Navigation
-      vim.keymap.set("n", "<C-h>", function() if View.wins.side then api.nvim_set_current_win(View.wins.side) end end, opts)
-      vim.keymap.set("n", "<C-l>", function() if View.wins.main then api.nvim_set_current_win(View.wins.main) end end, opts)
+      vim.keymap.set("n", "<C-h>", function() 
+        if View.components.side.win and api.nvim_win_is_valid(View.components.side.win) then 
+          api.nvim_set_current_win(View.components.side.win) 
+        end 
+      end, opts)
+      vim.keymap.set("n", "<C-l>", function() 
+        local main_win = View.wins.main and View.wins.main.win
+        if main_win and api.nvim_win_is_valid(main_win) then 
+          api.nvim_set_current_win(main_win) 
+        end 
+      end, opts)
     end
   end
 end

@@ -57,13 +57,28 @@ local listeners = {
 }
 
 function M.subscribe(path, callback)
+  local list
+  local cb = callback
+  
   if type(path) == "function" then
-    table.insert(listeners.global, path)
-    return
+    list = listeners.global
+    cb = path
+  else
+    if not listeners.path[path] then listeners.path[path] = {} end
+    list = listeners.path[path]
   end
   
-  if not listeners.path[path] then listeners.path[path] = {} end
-  table.insert(listeners.path[path], callback)
+  table.insert(list, cb)
+  
+  -- Return unsubscribe function
+  return function()
+    for i, listener in ipairs(list) do
+      if listener == cb then
+        table.remove(list, i)
+        break
+      end
+    end
+  end
 end
 
 function M.emit(path, value)
@@ -78,6 +93,22 @@ function M.emit(path, value)
   for _, cb in ipairs(listeners.global) do
     cb(path, value)
   end
+end
+
+local function deep_equal(a, b)
+  if a == b then return true end
+  if type(a) ~= 'table' or type(b) ~= 'table' then return false end
+  
+  local count_a = 0
+  for k, v in pairs(a) do
+    count_a = count_a + 1
+    if not deep_equal(v, b[k]) then return false end
+  end
+  
+  local count_b = 0
+  for _ in pairs(b) do count_b = count_b + 1 end
+  
+  return count_a == count_b
 end
 
 -- Deep update helper
@@ -95,8 +126,8 @@ function M.set(path, value)
   local last_key = keys[#keys]
   local old_value = current[last_key]
   
-  -- Only update and emit if value changed (shallow check for simplicity, deep would be better but expensive)
-  if old_value ~= value then
+  -- Only update and emit if value changed (Deep comparison to prevent redundant UI redraws)
+  if not deep_equal(old_value, value) then
     current[last_key] = value
     M.emit(path, value)
   end

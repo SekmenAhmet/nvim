@@ -32,6 +32,18 @@ function M.exec(cmd, opts, cb)
   end
 
   local timer
+  local function cleanup()
+    if timer then
+      timer:stop()
+      if not timer:is_closing() then timer:close() end
+      timer = nil
+    end
+    if stdout and not stdout:is_closing() then stdout:close() end
+    if stderr and not stderr:is_closing() then stderr:close() end
+    if stdin_pipe and not stdin_pipe:is_closing() then stdin_pipe:close() end
+    if handle and not handle:is_closing() then handle:close() end
+  end
+
   if opts.timeout then
     timer = uv.new_timer()
     timer:start(opts.timeout, 0, function()
@@ -41,29 +53,37 @@ function M.exec(cmd, opts, cb)
     end)
   end
 
-  handle = uv.spawn(cmd, {
+  local exit_code = nil
+  local stdout_closed = false
+  local stderr_closed = false
+
+  local function try_finish()
+    if exit_code and stdout_closed and stderr_closed then
+      cleanup()
+      vim.schedule(function()
+        if cb then
+          cb(exit_code, table.concat(stdout_data), table.concat(stderr_data))
+        end
+      end)
+    end
+  end
+
+  handle, _ = uv.spawn(cmd, {
     args = args,
     cwd = cwd,
     stdio = stdio
-  }, function(code, signal)
-    if handle then handle:close() end
-    if stdout then stdout:close() end
-    if stderr then stderr:close() end
-    if stdin_pipe and not stdin_pipe:is_closing() then stdin_pipe:close() end
-    if timer then
-      timer:stop()
-      timer:close()
-    end
-    
-    vim.schedule(function()
-      if cb then
-        cb(code, table.concat(stdout_data), table.concat(stderr_data))
-      end
-    end)
+  }, function(code, _)
+    exit_code = code
+    try_finish()
   end)
 
   if not handle then
-    if cb then cb(-1, "", "Failed to spawn " .. cmd) end
+    cleanup()
+    if cb then
+      vim.schedule(function()
+        cb(-1, "", "Failed to spawn " .. cmd)
+      end)
+    end
     return
   end
 
@@ -78,11 +98,21 @@ function M.exec(cmd, opts, cb)
   end
 
   uv.read_start(stdout, function(err, data)
-    if data then table.insert(stdout_data, data) end
+    if data then
+      table.insert(stdout_data, data)
+    else
+      stdout_closed = true
+      try_finish()
+    end
   end)
   
   uv.read_start(stderr, function(err, data)
-    if data then table.insert(stderr_data, data) end
+    if data then
+      table.insert(stderr_data, data)
+    else
+      stderr_closed = true
+      try_finish()
+    end
   end)
 end
 
